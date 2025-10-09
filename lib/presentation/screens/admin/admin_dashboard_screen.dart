@@ -105,10 +105,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             width: 60.w,
             height: 60.h,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.3),
+                color: Colors.white.withValues(alpha: 0.3),
                 width: 2,
               ),
             ),
@@ -134,7 +134,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 4.h),
                   decoration: BoxDecoration(
-                    color: AppColors.admin.withOpacity(0.8),
+                    color: AppColors.admin.withValues(alpha: 0.8),
                     borderRadius: BorderRadius.circular(12.r),
                   ),
                   child: Text(
@@ -242,7 +242,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 width: 40.w,
                 height: 40.h,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10.r),
                 ),
                 child: Icon(icon, color: color, size: 22.sp),
@@ -353,13 +353,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 end: Alignment.bottomRight,
                 colors: [
                   color,
-                  color.withOpacity(0.7),
+                  color.withValues(alpha: 0.1),
                 ],
               ),
               borderRadius: BorderRadius.circular(16.r),
               boxShadow: [
                 BoxShadow(
-                  color: color.withOpacity(0.3),
+                  color: color.withValues(alpha: 0.3),
                   blurRadius: 8,
                   offset: Offset(0, 4),
                 ),

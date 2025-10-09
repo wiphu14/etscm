@@ -66,6 +66,6 @@ class AppColors {
   );
   
   // Glass Effect Colors
-  static Color glass = Colors.white.withOpacity(0.1);
-  static Color glassBorder = Colors.white.withOpacity(0.2);
+static Color glass = Colors.white.withValues(alpha: 0.1);
+static Color glassBorder = Colors.white.withValues(alpha: 0.2);
 }

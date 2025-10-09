@@ -113,7 +113,7 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
               width: 80.w,
               height: 80.h,
               decoration: BoxDecoration(
-                color: AppColors.exit.withOpacity(0.1),
+                color: AppColors.entry.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -164,7 +164,7 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
         flexibleSpace: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [AppColors.exit, AppColors.exit.withOpacity(0.8)],
+              colors: [AppColors.exit, AppColors.exit.withValues(alpha:0.8)],
             ),
           ),
         ),
@@ -207,7 +207,7 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
                   Container(
                     padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
                     decoration: BoxDecoration(
-                      color: AppColors.info.withOpacity(0.1),
+                      color: AppColors.info.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(6.r),
                     ),
                     child: Text(
@@ -307,7 +307,7 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
                       width: 50.w,
                       height: 50.h,
                       decoration: BoxDecoration(
-                        color: AppColors.exit.withOpacity(0.1),
+                        color: AppColors.exit.withValues(alpha:0.1),
                         borderRadius: BorderRadius.circular(12.r),
                       ),
                       child: Icon(

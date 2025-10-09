@@ -183,7 +183,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
               width: 80.w,
               height: 80.h,
               decoration: BoxDecoration(
-                color: AppColors.entry.withOpacity(0.1),
+                color: AppColors.entry.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -270,7 +270,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
         flexibleSpace: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [AppColors.entry, AppColors.entry.withOpacity(0.8)],
+              colors: [AppColors.entry, AppColors.entry.withValues(alpha:0.8)],
             ),
           ),
         ),
@@ -493,7 +493,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
               decoration: BoxDecoration(
-                color: AppColors.info.withOpacity(0.1),
+                color: AppColors.info.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(4.r),
               ),
               child: Text(
@@ -651,7 +651,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
               leading: Container(
                 padding: EdgeInsets.all(8.w),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
+                  color: AppColors.primary.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8.r),
                 ),
                 child: Icon(Icons.camera_alt_rounded, color: AppColors.primary, size: 24.sp),
@@ -668,7 +668,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
               leading: Container(
                 padding: EdgeInsets.all(8.w),
                 decoration: BoxDecoration(
-                  color: AppColors.accent.withOpacity(0.1),
+                  color: AppColors.accent.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8.r),
                 ),
                 child: Icon(Icons.photo_library_rounded, color: AppColors.accent, size: 24.sp),
@@ -686,7 +686,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
                 leading: Container(
                   padding: EdgeInsets.all(8.w),
                   decoration: BoxDecoration(
-                    color: AppColors.error.withOpacity(0.1),
+                    color: AppColors.error.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(8.r),
                   ),
                   child: Icon(Icons.delete_rounded, color: AppColors.error, size: 24.sp),
@@ -734,7 +734,7 @@ class _VisitorEntryScreenState extends State<VisitorEntryScreen> {
       child: Container(
         padding: EdgeInsets.all(16.w),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withOpacity(0.1) : AppColors.surfaceLight,
+          color: isSelected ? AppColors.primary.withValues(alpha:0.1) : AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(12.r),
           border: Border.all(
             color: isSelected ? AppColors.primary : AppColors.border,
