@@ -42,8 +42,11 @@ class AppColors {
   static const Color border = Color(0xFFE0E0E0);
   static const Color divider = Color(0xFFEEEEEE);
   
+  
+
   // Shadow
   static const Color shadow = Color(0x1A000000);
+  static const Color shadowLight = Color(0x0F000000);
   static const Color shadowDark = Color(0x33000000);
   
   // Gradients

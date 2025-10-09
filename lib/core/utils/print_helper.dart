@@ -15,7 +15,93 @@ class PrintHelper {
     }
   }
 
-  /// พิมพ์ใบผ่านเข้า
+  /// พิมพ์ใบผ่านเข้า พร้อม QR Code
+  static Future<bool> printEntryPassWithQR({
+    required String visitorName,
+    required String phone,
+    required String licensePlate,
+    required String vehicleType,
+    required String houseNumber,
+    required String residentName,
+    required String purpose,
+    required DateTime entryTime,
+    required String villageName,
+    required String staffName,
+    required String qrCode,
+  }) async {
+    try {
+      // Header - Center Aligned
+      await SunmiPrinter.printText('═══════════════════════');
+      await SunmiPrinter.printText('       🏘️');
+      await SunmiPrinter.printText('   ใบผ่านเข้า-ออก');
+      await SunmiPrinter.printText('   $villageName');
+      await SunmiPrinter.printText('═══════════════════════');
+      await SunmiPrinter.lineWrap(1);
+
+      // Entry Badge
+      await SunmiPrinter.printText('     🟢 เข้า');
+      await SunmiPrinter.lineWrap(1);
+
+      // Date & Time
+      await SunmiPrinter.printText(
+        'วันที่: ${DateFormat('d/M/yyyy', 'th').format(entryTime)}',
+      );
+      await SunmiPrinter.printText(
+        'เวลา: ${DateFormat('HH:mm น.').format(entryTime)}',
+      );
+      await SunmiPrinter.printText('───────────────────────');
+      
+      // Visitor Information
+      await SunmiPrinter.printText('ข้อมูลผู้มาติดต่อ');
+      await SunmiPrinter.printText('ชื่อ: $visitorName');
+      await SunmiPrinter.printText('เบอร์: $phone');
+      await SunmiPrinter.printText('ยานพาหนะ: $vehicleType');
+      await SunmiPrinter.printText('ทะเบียน: $licensePlate');
+      await SunmiPrinter.printText('───────────────────────');
+      
+      // Destination
+      await SunmiPrinter.printText('จุดหมาย');
+      await SunmiPrinter.printText('บ้านเลขที่: $houseNumber');
+      await SunmiPrinter.printText('เจ้าบ้าน: $residentName');
+      await SunmiPrinter.printText('วัตถุประสงค์: $purpose');
+      await SunmiPrinter.printText('───────────────────────');
+      
+      // QR Code Section
+      await SunmiPrinter.lineWrap(1);
+      await SunmiPrinter.printText('   📱 Scan เพื่อออก');
+      await SunmiPrinter.lineWrap(1);
+      
+      // Print QR Code (ใช้ parameters ที่ถูกต้อง)
+      await SunmiPrinter.printQRCode(qrCode);
+      
+      await SunmiPrinter.lineWrap(1);
+      await SunmiPrinter.printText('รหัส: $qrCode');
+      await SunmiPrinter.lineWrap(1);
+      await SunmiPrinter.printText('───────────────────────');
+      
+      // Staff Info
+      await SunmiPrinter.printText('บันทึกโดย: $staffName');
+      await SunmiPrinter.lineWrap(1);
+      
+      // Footer
+      await SunmiPrinter.printText('═══════════════════════');
+      await SunmiPrinter.printText(' กรุณาเก็บใบผ่านนี้ไว้');
+      await SunmiPrinter.printText(' สำหรับแสดงขณะออก');
+      await SunmiPrinter.printText('   หรือ Scan QR Code');
+      await SunmiPrinter.printText('═══════════════════════');
+      await SunmiPrinter.lineWrap(3);
+      
+      // Cut paper
+      await SunmiPrinter.cutPaper();
+      
+      return true;
+    } catch (e) {
+      debugPrint('Print error: $e');
+      return false;
+    }
+  }
+
+  /// พิมพ์ใบผ่านเข้า (ฟังก์ชันเดิม - backward compatibility)
   static Future<bool> printEntryPass({
     required String visitorName,
     required String phone,
@@ -31,14 +117,14 @@ class PrintHelper {
     try {
       // Header
       await SunmiPrinter.printText('═══════════════════════');
-      await SunmiPrinter.printText('🏘️');
-      await SunmiPrinter.printText('ใบผ่านเข้า-ออก');
-      await SunmiPrinter.printText(villageName);
+      await SunmiPrinter.printText('       🏘️');
+      await SunmiPrinter.printText('   ใบผ่านเข้า-ออก');
+      await SunmiPrinter.printText('   $villageName');
       await SunmiPrinter.printText('═══════════════════════');
       await SunmiPrinter.lineWrap(1);
 
       // Entry Badge
-      await SunmiPrinter.printText('🟢 เข้า');
+      await SunmiPrinter.printText('     🟢 เข้า');
       await SunmiPrinter.lineWrap(1);
 
       // Date & Time
@@ -71,8 +157,8 @@ class PrintHelper {
       
       // Footer
       await SunmiPrinter.printText('═══════════════════════');
-      await SunmiPrinter.printText('กรุณาเก็บใบผ่านนี้ไว้');
-      await SunmiPrinter.printText('สำหรับแสดงขณะออก');
+      await SunmiPrinter.printText(' กรุณาเก็บใบผ่านนี้ไว้');
+      await SunmiPrinter.printText(' สำหรับแสดงขณะออก');
       await SunmiPrinter.printText('═══════════════════════');
       await SunmiPrinter.lineWrap(3);
       
@@ -99,14 +185,14 @@ class PrintHelper {
     try {
       // Header
       await SunmiPrinter.printText('═══════════════════════');
-      await SunmiPrinter.printText('🏘️');
-      await SunmiPrinter.printText('ใบยืนยันออก');
-      await SunmiPrinter.printText(villageName);
+      await SunmiPrinter.printText('       🏘️');
+      await SunmiPrinter.printText('    ใบยืนยันออก');
+      await SunmiPrinter.printText('   $villageName');
       await SunmiPrinter.printText('═══════════════════════');
       await SunmiPrinter.lineWrap(1);
 
       // Exit Badge
-      await SunmiPrinter.printText('🔴 ออก');
+      await SunmiPrinter.printText('     🔴 ออก');
       await SunmiPrinter.lineWrap(1);
 
       // Information
@@ -136,7 +222,7 @@ class PrintHelper {
       
       // Footer
       await SunmiPrinter.printText('═══════════════════════');
-      await SunmiPrinter.printText('ขอบคุณที่ใช้บริการ');
+      await SunmiPrinter.printText('  ขอบคุณที่ใช้บริการ');
       await SunmiPrinter.printText('═══════════════════════');
       await SunmiPrinter.lineWrap(3);
       
@@ -162,8 +248,8 @@ class PrintHelper {
     try {
       // Header
       await SunmiPrinter.printText('═══════════════════════');
-      await SunmiPrinter.printText('รายงานสรุปประจำวัน');
-      await SunmiPrinter.printText(villageName);
+      await SunmiPrinter.printText(' รายงานสรุปประจำวัน');
+      await SunmiPrinter.printText('   $villageName');
       await SunmiPrinter.printText('═══════════════════════');
       await SunmiPrinter.lineWrap(1);
 
@@ -210,10 +296,10 @@ class PrintHelper {
   static Future<bool> printTestPage() async {
     try {
       await SunmiPrinter.printText('═══════════════════════');
-      await SunmiPrinter.printText('ทดสอบเครื่องพิมพ์');
+      await SunmiPrinter.printText('  ทดสอบเครื่องพิมพ์');
       await SunmiPrinter.lineWrap(1);
       
-      await SunmiPrinter.printText('Sunmi Printer Test');
+      await SunmiPrinter.printText(' Sunmi Printer Test');
       await SunmiPrinter.lineWrap(1);
       
       await SunmiPrinter.printText('───────────────────────');
@@ -236,6 +322,40 @@ class PrintHelper {
       return true;
     } catch (e) {
       debugPrint('Print test error: $e');
+      return false;
+    }
+  }
+
+  /// พิมพ์ QR Code แยก (สำหรับทดสอบ)
+  static Future<bool> printQRCodeOnly({
+    required String qrData,
+    String? title,
+  }) async {
+    try {
+      if (title != null) {
+        await SunmiPrinter.printText('═══════════════════════');
+        await SunmiPrinter.printText('   $title');
+        await SunmiPrinter.printText('═══════════════════════');
+        await SunmiPrinter.lineWrap(1);
+      }
+      
+      // Print QR Code
+      await SunmiPrinter.printQRCode(qrData);
+      
+      await SunmiPrinter.lineWrap(1);
+      await SunmiPrinter.printText('รหัส: $qrData');
+      await SunmiPrinter.lineWrap(1);
+      
+      if (title != null) {
+        await SunmiPrinter.printText('═══════════════════════');
+      }
+      
+      await SunmiPrinter.lineWrap(3);
+      await SunmiPrinter.cutPaper();
+      
+      return true;
+    } catch (e) {
+      debugPrint('Print QR Code error: $e');
       return false;
     }
   }
