@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/services/api_service.dart';
+import '../../data/repositories/auth_repository.dart';
 
 class AuthProvider with ChangeNotifier {
   bool _isAuthenticated = false;
@@ -9,6 +11,7 @@ class AuthProvider with ChangeNotifier {
   String? _role;
   int? _villageId;
   String? _villageName;
+  String? _token;
 
   bool get isAuthenticated => _isAuthenticated;
   String? get userId => _userId;
@@ -17,11 +20,23 @@ class AuthProvider with ChangeNotifier {
   String? get role => _role;
   int? get villageId => _villageId;
   String? get villageName => _villageName;
+  String? get token => _token;
   
   bool get isAdmin => _role == 'admin';
   bool get isUser => _role == 'user';
 
-  // Login
+  // API Service & Repository
+  late ApiService _apiService;
+  late AuthRepository _authRepository;
+
+  AuthProvider() {
+    _apiService = ApiService();
+    _authRepository = AuthRepository(_apiService);
+  }
+
+  // ============================================
+  // Login - เชื่อมต่อ API จริง
+  // ============================================
   Future<bool> login({
     required String username,
     required String password,
@@ -29,63 +44,125 @@ class AuthProvider with ChangeNotifier {
     int? villageId,
   }) async {
     try {
-      // TODO: Uncomment to use real API
-      /*
-      final apiService = ApiService();
-      final authRepository = AuthRepository(apiService);
-      
-      final result = await authRepository.login(
+      debugPrint('🔵 ========================================');
+      debugPrint('🔵 เริ่มต้น Login...');
+      debugPrint('🔵 Username: $username');
+      debugPrint('🔵 Role: $role');
+      debugPrint('🔵 Village ID: $villageId');
+      debugPrint('🔵 ========================================');
+
+      final result = await _authRepository.login(
         username: username,
         password: password,
         role: role,
         villageId: villageId,
       );
-      
-      if (result['success']) {
+
+      debugPrint('🟡 Login Response: $result');
+
+      if (result['success'] == true) {
         final user = result['user'];
-        _isAuthenticated = true;
-        _userId = user['id'].toString();
-        _username = user['username'];
-        _fullName = user['full_name'];
-        _role = user['role'];
-        _villageId = user['village_id'];
-        _villageName = user['village_name'];
         
+        debugPrint('🟢 Login สำเร็จ!');
+        debugPrint('🟢 User Data: $user');
+
+        _isAuthenticated = true;
+        _userId = user['id']?.toString() ?? '';
+        _username = user['username'] ?? username;
+        _fullName = user['full_name'] ?? user['fullName'] ?? '';
+        _role = user['role'] ?? role;
+        _villageId = user['village_id'] ?? villageId;
+        _villageName = user['village_name'] ?? '';
+        _token = result['token'];
+
         await _saveAuthData();
         notifyListeners();
+        
+        debugPrint('🟢 บันทึกข้อมูล Auth สำเร็จ');
         return true;
       }
+
+      debugPrint('🔴 Login ไม่สำเร็จ: ${result['message']}');
       return false;
-      */
       
-      // Mock authentication (for testing without API)
-      await Future.delayed(const Duration(seconds: 2));
-      
-      if ((username == 'admin' && password == 'admin123' && role == 'admin') ||
-          (username == 'user001' && password == 'admin123' && role == 'user')) {
-        
-        _isAuthenticated = true;
-        _userId = role == 'admin' ? '1' : '2';
-        _username = username;
-        _fullName = role == 'admin' ? 'ผู้ดูแลระบบ' : 'สมชาย ใจดี';
-        _role = role;
-        _villageId = villageId;
-        _villageName = villageId != null ? 'หมู่บ้านสวนสยาม 1' : null;
-        
-        await _saveAuthData();
-        notifyListeners();
-        return true;
-      }
-      
-      return false;
-    } catch (e) {
-      debugPrint('Login error: $e');
+    } catch (e, stackTrace) {
+      debugPrint('🔴 ========================================');
+      debugPrint('🔴 Login Error: $e');
+      debugPrint('🔴 Stack Trace: $stackTrace');
+      debugPrint('🔴 ========================================');
       return false;
     }
   }
 
+  // ============================================
+  // Login สำหรับ Sunmi Device
+  // ============================================
+  Future<bool> loginSunmi({
+    required String username,
+    required String password,
+    required String deviceUuid,
+  }) async {
+    try {
+      debugPrint('🔵 ========================================');
+      debugPrint('🔵 เริ่มต้น Login Sunmi...');
+      debugPrint('🔵 Username: $username');
+      debugPrint('🔵 Device UUID: $deviceUuid');
+      debugPrint('🔵 ========================================');
+
+      final result = await _authRepository.loginSunmi(
+        username: username,
+        password: password,
+        deviceUuid: deviceUuid,
+      );
+
+      debugPrint('🟡 Login Sunmi Response: $result');
+
+      if (result['success'] == true) {
+        final user = result['user'];
+        final village = result['village'];
+        
+        debugPrint('🟢 Login Sunmi สำเร็จ!');
+        debugPrint('🟢 User: $user');
+        debugPrint('🟢 Village: $village');
+
+        _isAuthenticated = true;
+        _userId = user?['id']?.toString() ?? '';
+        _username = user?['username'] ?? username;
+        _fullName = user?['full_name'] ?? '';
+        _role = 'user';
+        _villageId = village?['id'];
+        _villageName = village?['name'] ?? village?['village_name'] ?? '';
+        _token = result['token'];
+
+        await _saveAuthData();
+        notifyListeners();
+        
+        debugPrint('🟢 บันทึกข้อมูล Auth Sunmi สำเร็จ');
+        return true;
+      }
+
+      debugPrint('🔴 Login Sunmi ไม่สำเร็จ: ${result['message']}');
+      return false;
+      
+    } catch (e, stackTrace) {
+      debugPrint('🔴 ========================================');
+      debugPrint('🔴 Login Sunmi Error: $e');
+      debugPrint('🔴 Stack Trace: $stackTrace');
+      debugPrint('🔴 ========================================');
+      return false;
+    }
+  }
+
+  // ============================================
   // Logout
+  // ============================================
   Future<void> logout() async {
+    try {
+      await _authRepository.logout();
+    } catch (e) {
+      debugPrint('Logout error: $e');
+    }
+    
     _isAuthenticated = false;
     _userId = null;
     _username = null;
@@ -93,6 +170,7 @@ class AuthProvider with ChangeNotifier {
     _role = null;
     _villageId = null;
     _villageName = null;
+    _token = null;
     
     // Clear SharedPreferences
     final prefs = await SharedPreferences.getInstance();
@@ -101,7 +179,9 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // ============================================
   // Save authentication data
+  // ============================================
   Future<void> _saveAuthData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isAuthenticated', true);
@@ -115,9 +195,14 @@ class AuthProvider with ChangeNotifier {
     if (_villageName != null) {
       await prefs.setString('villageName', _villageName!);
     }
+    if (_token != null) {
+      await prefs.setString('auth_token', _token!);
+    }
   }
 
+  // ============================================
   // Load authentication data
+  // ============================================
   Future<void> loadAuthData() async {
     final prefs = await SharedPreferences.getInstance();
     _isAuthenticated = prefs.getBool('isAuthenticated') ?? false;
@@ -127,7 +212,23 @@ class AuthProvider with ChangeNotifier {
     _role = prefs.getString('role');
     _villageId = prefs.getInt('villageId');
     _villageName = prefs.getString('villageName');
+    _token = prefs.getString('auth_token');
     
     notifyListeners();
+  }
+
+  // ============================================
+  // Test Connection
+  // ============================================
+  Future<Map<String, dynamic>> testConnection() async {
+    try {
+      debugPrint('🔵 ทดสอบการเชื่อมต่อ...');
+      final result = await _authRepository.testConnection();
+      debugPrint('🟢 ผลการทดสอบ: $result');
+      return result;
+    } catch (e) {
+      debugPrint('🔴 Test Connection Error: $e');
+      return {'success': false, 'error': e.toString()};
+    }
   }
 }
