@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../data/services/api_service.dart';
+import '../../../data/repositories/entry_log_repository.dart';
 import '../../widgets/custom_card.dart';
-import '../../widgets/custom_text_field.dart';
 import '../../widgets/loading_widget.dart';
+import '../../providers/auth_provider.dart';
 
 class VisitorHistoryScreen extends StatefulWidget {
   const VisitorHistoryScreen({super.key});
@@ -17,72 +20,122 @@ class VisitorHistoryScreen extends StatefulWidget {
 class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
   final _searchController = TextEditingController();
   
-  final bool _isLoading = false;
-  String _selectedFilter = 'all';
   DateTime _selectedDate = DateTime.now();
+  String _selectedFilter = 'all'; // all, inside, exited
+  bool _isLoading = true;
+  
+  List<Map<String, dynamic>> _historyLogs = [];
+  
+  // API Service & Repository
+  late ApiService _apiService;
+  late EntryLogRepository _entryLogRepository;
 
-  // Mock history data
-  final List<Map<String, dynamic>> _historyData = [
-    {
-      'id': 1,
-      'visitor_name': 'นายสมชาย ใจดี',
-      'phone': '081-111-2222',
-      'license_plate': 'กข-1234',
-      'house_number': '123/45',
-      'resident_name': 'นายสมหมาย รักดี',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 5)),
-      'exit_time': DateTime.now().subtract(const Duration(hours: 3)),
-      'purpose': 'มาเยี่ยมบ้าน',
-      'status': 'completed',
-    },
-    {
-      'id': 2,
-      'visitor_name': 'นางสมหญิง รักงาน',
-      'phone': '081-333-4444',
-      'license_plate': 'คค-5678',
-      'house_number': '234/56',
-      'resident_name': 'นางสาวสมใจ ใจงาม',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 2)),
-      'exit_time': null,
-      'purpose': 'ส่งของ',
-      'status': 'inside',
-    },
-    {
-      'id': 3,
-      'visitor_name': 'นายประยุทธ สุขสม',
-      'phone': '081-555-6666',
-      'license_plate': 'งง-9012',
-      'house_number': '345/67',
-      'resident_name': 'นายสมศักดิ์ มั่นคง',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 6)),
-      'exit_time': DateTime.now().subtract(const Duration(hours: 4)),
-      'purpose': 'ติดต่อธุระ',
-      'status': 'completed',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _apiService = ApiService();
+    _entryLogRepository = EntryLogRepository(_apiService);
+    _loadHistory();
+  }
 
-  List<Map<String, dynamic>> get filteredHistory {
-    var filtered = _historyData;
-
-    // Filter by status
-    if (_selectedFilter == 'entry') {
-      filtered = filtered.where((h) => h['status'] == 'inside').toList();
-    } else if (_selectedFilter == 'exit') {
-      filtered = filtered.where((h) => h['status'] == 'completed').toList();
+  Future<void> _loadHistory() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final authProvider = context.read<AuthProvider>();
+      
+      debugPrint('🔵 กำลังโหลดประวัติเข้าออก...');
+      debugPrint('🔵 Village ID: ${authProvider.villageId}');
+      debugPrint('🔵 Date: ${_selectedDate.toIso8601String().split('T')[0]}');
+      
+      final logs = await _entryLogRepository.getLogsByDate(
+        date: _selectedDate,
+        villageId: authProvider.villageId,
+      );
+      
+      debugPrint('🟢 พบประวัติ ${logs.length} รายการ');
+      
+      if (mounted) {
+        setState(() {
+          _historyLogs = logs.map((log) {
+            // แปลง entry_time จาก String เป็น DateTime
+            DateTime? entryTime;
+            DateTime? exitTime;
+            
+            if (log['entry_time'] != null) {
+              try {
+                entryTime = DateTime.parse(log['entry_time'].toString());
+              } catch (e) {
+                entryTime = DateTime.now();
+              }
+            }
+            
+            if (log['exit_time'] != null) {
+              try {
+                exitTime = DateTime.parse(log['exit_time'].toString());
+              } catch (e) {
+                exitTime = null;
+              }
+            }
+            
+            return {
+              ...log,
+              'entry_time': entryTime ?? DateTime.now(),
+              'exit_time': exitTime,
+              'visitor_name': log['visitor_name'] ?? log['full_name'] ?? 'ไม่ระบุ',
+              'status': exitTime != null ? 'exited' : 'inside',
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('🔴 โหลดประวัติไม่สำเร็จ: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('ไม่สามารถโหลดประวัติได้: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
+  }
 
-    // Filter by search
+  List<Map<String, dynamic>> get filteredLogs {
+    var logs = _historyLogs;
+    
+    // กรองตาม status
+    if (_selectedFilter == 'inside') {
+      logs = logs.where((log) => log['status'] == 'inside').toList();
+    } else if (_selectedFilter == 'exited') {
+      logs = logs.where((log) => log['status'] == 'exited').toList();
+    }
+    
+    // กรองตาม search
     if (_searchController.text.isNotEmpty) {
-      final query = _searchController.text.toLowerCase();
-      filtered = filtered.where((h) {
-        return h['visitor_name'].toLowerCase().contains(query) ||
-            h['license_plate'].toLowerCase().contains(query) ||
-            h['house_number'].toLowerCase().contains(query);
+      final query = _searchController.text.toLowerCase().trim();
+      logs = logs.where((log) {
+        final name = (log['visitor_name'] ?? '').toString().toLowerCase();
+        final plate = (log['license_plate'] ?? '').toString().toLowerCase();
+        final house = (log['house_number'] ?? '').toString().toLowerCase();
+        final code = (log['qr_code'] ?? log['visitor_code'] ?? '').toString().toLowerCase();
+        
+        return name.contains(query) || 
+               plate.contains(query) || 
+               house.contains(query) ||
+               code.contains(query);
       }).toList();
     }
-
-    return filtered;
+    
+    return logs;
   }
+
+  int get insideCount => _historyLogs.where((log) => log['status'] == 'inside').length;
+  int get exitedCount => _historyLogs.where((log) => log['status'] == 'exited').length;
 
   @override
   void dispose() {
@@ -91,64 +144,26 @@ class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
   }
 
   Future<void> _selectDate() async {
-    final picked = await showDatePicker(
+    final date = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: AppColors.primary,
-            ),
-          ),
-          child: child!,
-        );
-      },
+      locale: const Locale('th', 'TH'),
     );
-    if (picked != null) {
-      setState(() => _selectedDate = picked);
-      _loadDataForSelectedDate();
-    }
-  }
-
-  /// Load history data for the selected date
-  /// Replace mock data with actual API call when backend is ready
-  void _loadDataForSelectedDate() {
-    // Mock implementation - replace with actual database query
-    // Example: final data = await _visitRepository.getHistoryByDate(_selectedDate);
-    // setState(() => _historyData = data);
-  }
-
-  /// Export history data to Excel file
-  /// Uses ExcelHelper to generate and save the file
-  void _exportToExcel() {
-    // Mock implementation - replace with actual Excel export
-    // Example: await ExcelHelper.exportEntryExitReport(
-    //   data: filteredHistory,
-    //   villageName: 'หมู่บ้านตัวอย่าง',
-    //   startDate: _selectedDate,
-    //   endDate: _selectedDate,
-    // );
     
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('ฟีเจอร์ Export Excel จะพร้อมใช้งานเร็วๆ นี้'),
-        backgroundColor: AppColors.info,
-      ),
-    );
+    if (date != null) {
+      setState(() => _selectedDate = date);
+      _loadHistory();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('ประวัติการเข้าออก', style: AppTextStyles.appBarTitle),
-        flexibleSpace: Container(
-          decoration: BoxDecoration(gradient: AppColors.primaryGradient),
-        ),
+        title: Text('ประวัติการเข้าออก', style: AppTextStyles.h4.copyWith(color: Colors.white)),
+        backgroundColor: AppColors.primary,
         elevation: 0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_rounded, color: Colors.white),
@@ -156,8 +171,12 @@ class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.file_download_rounded, color: Colors.white),
-            onPressed: _exportToExcel,
+            icon: Icon(Icons.download_rounded, color: Colors.white),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('ส่งออกข้อมูล - Coming Soon')),
+              );
+            },
           ),
         ],
       ),
@@ -166,15 +185,14 @@ class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
           // Date Selector
           Container(
             padding: EdgeInsets.all(16.w),
-            color: AppColors.background,
-            child: GestureDetector(
+            color: Colors.white,
+            child: InkWell(
               onTap: _selectDate,
               child: Container(
-                padding: EdgeInsets.all(16.w),
+                padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 14.h),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12.r),
                   border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(12.r),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -182,54 +200,114 @@ class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
                     Icon(Icons.calendar_today_rounded, color: AppColors.primary, size: 20.sp),
                     SizedBox(width: 12.w),
                     Text(
-                      DateFormat('วันEEEที่ d MMMM yyyy', 'th').format(_selectedDate),
+                      DateFormat('วันE ที่ d MMMM yyyy', 'th').format(_selectedDate),
                       style: AppTextStyles.bodyMedium.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    SizedBox(width: 8.w),
+                    Spacer(),
                     Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary),
                   ],
                 ),
               ),
             ),
           ),
-
+          
           // Search Bar
           Container(
-            padding: EdgeInsets.symmetric(horizontal: 16.w),
-            child: CustomTextField(
-              controller: _searchController,
-              hint: 'ค้นหาด้วย ชื่อ, ทะเบียน, บ้านเลขที่',
-              prefixIcon: Icons.search_rounded,
-              onChanged: (value) => setState(() {}),
+            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+            color: Colors.white,
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                borderRadius: BorderRadius.circular(12.r),
+              ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (value) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'ค้นหาด้วย ชื่อ, ทะเบียน, บ้านเลขที่',
+                  hintStyle: AppTextStyles.hint,
+                  prefixIcon: Icon(Icons.search_rounded, color: AppColors.textHint),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.clear_rounded, color: AppColors.textHint),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {});
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 14.h),
+                ),
+              ),
             ),
           ),
-
-          SizedBox(height: 12.h),
-
+          
           // Filter Tabs
-          _buildFilterTabs(),
-
+          Container(
+            padding: EdgeInsets.all(16.w),
+            color: Colors.white,
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildFilterTab(
+                    label: 'ทั้งหมด',
+                    count: _historyLogs.length,
+                    isSelected: _selectedFilter == 'all',
+                    onTap: () => setState(() => _selectedFilter = 'all'),
+                    color: AppColors.primary,
+                  ),
+                ),
+                SizedBox(width: 8.w),
+                Expanded(
+                  child: _buildFilterTab(
+                    label: 'อยู่ภายใน',
+                    count: insideCount,
+                    isSelected: _selectedFilter == 'inside',
+                    onTap: () => setState(() => _selectedFilter = 'inside'),
+                    color: AppColors.entry,
+                  ),
+                ),
+                SizedBox(width: 8.w),
+                Expanded(
+                  child: _buildFilterTab(
+                    label: 'ออกแล้ว',
+                    count: exitedCount,
+                    isSelected: _selectedFilter == 'exited',
+                    onTap: () => setState(() => _selectedFilter = 'exited'),
+                    color: AppColors.exit,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
           SizedBox(height: 8.h),
-
+          
           // History List
           Expanded(
             child: _isLoading
-                ? LoadingWidget(message: 'กำลังโหลดข้อมูล...')
-                : filteredHistory.isEmpty
+                ? LoadingWidget(message: 'กำลังโหลด...')
+                : filteredLogs.isEmpty
                     ? EmptyStateWidget(
                         icon: Icons.history_rounded,
-                        title: 'ไม่พบข้อมูล',
-                        subtitle: 'ไม่มีประวัติการเข้าออกในวันที่เลือก',
+                        title: 'ไม่พบประวัติ',
+                        subtitle: _searchController.text.isEmpty
+                            ? 'ไม่มีประวัติการเข้าออกในวันที่เลือก'
+                            : 'ไม่พบผลลัพธ์จากการค้นหา',
                       )
-                    : ListView.builder(
-                        padding: EdgeInsets.symmetric(horizontal: 16.w),
-                        itemCount: filteredHistory.length,
-                        itemBuilder: (context, index) {
-                          final history = filteredHistory[index];
-                          return _buildHistoryCard(history);
-                        },
+                    : RefreshIndicator(
+                        onRefresh: _loadHistory,
+                        child: ListView.builder(
+                          padding: EdgeInsets.symmetric(horizontal: 16.w),
+                          itemCount: filteredLogs.length,
+                          itemBuilder: (context, index) {
+                            final log = filteredLogs[index];
+                            return _buildHistoryCard(log);
+                          },
+                        ),
                       ),
           ),
         ],
@@ -237,150 +315,148 @@ class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
     );
   }
 
-  Widget _buildFilterTabs() {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16.w),
-      child: Row(
-        children: [
-          _buildFilterChip('ทั้งหมด', 'all', _historyData.length),
-          SizedBox(width: 8.w),
-          _buildFilterChip(
-            'อยู่ภายใน',
-            'entry',
-            _historyData.where((h) => h['status'] == 'inside').length,
-          ),
-          SizedBox(width: 8.w),
-          _buildFilterChip(
-            'ออกแล้ว',
-            'exit',
-            _historyData.where((h) => h['status'] == 'completed').length,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String label, String value, int count) {
-    final isSelected = _selectedFilter == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _selectedFilter = value),
-        child: Container(
-          padding: EdgeInsets.symmetric(vertical: 12.h),
-          decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : AppColors.cardBackground,
-            borderRadius: BorderRadius.circular(12.r),
-            border: Border.all(
-              color: isSelected ? AppColors.primary : AppColors.border,
+  Widget _buildFilterTab({
+    required String label,
+    required int count,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 12.h),
+        decoration: BoxDecoration(
+          color: isSelected ? color : AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(10.r),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: isSelected ? Colors.white : AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: isSelected ? Colors.white : AppColors.textPrimary,
-                  fontWeight: FontWeight.w600,
-                ),
+            SizedBox(height: 2.h),
+            Text(
+              count.toString(),
+              style: AppTextStyles.bodyMedium.copyWith(
+                color: isSelected ? Colors.white : color,
+                fontWeight: FontWeight.bold,
               ),
-              SizedBox(height: 4.h),
-              Text(
-                '$count',
-                style: AppTextStyles.caption.copyWith(
-                  color: isSelected ? Colors.white : AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHistoryCard(Map<String, dynamic> history) {
-    final isInside = history['status'] == 'inside';
-    final statusColor = isInside ? AppColors.entry : AppColors.success;
-
+  Widget _buildHistoryCard(Map<String, dynamic> log) {
+    final isExited = log['status'] == 'exited';
+    final statusColor = isExited ? AppColors.exit : AppColors.entry;
+    
+    DateTime entryTime = log['entry_time'] is DateTime 
+        ? log['entry_time'] 
+        : DateTime.now();
+    
+    DateTime? exitTime = log['exit_time'] is DateTime 
+        ? log['exit_time'] 
+        : null;
+    
     return CustomCard(
       margin: EdgeInsets.only(bottom: 12.h),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 50.w,
-                height: 50.h,
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12.r),
-                ),
-                child: Icon(
-                  Icons.person_rounded,
-                  color: statusColor,
-                  size: 26.sp,
-                ),
-              ),
-              SizedBox(width: 12.w),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      history['visitor_name'],
-                      style: AppTextStyles.cardTitle,
-                    ),
-                    SizedBox(height: 4.h),
-                    Text(
-                      history['license_plate'],
-                      style: AppTextStyles.caption,
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8.r),
-                ),
-                child: Text(
-                  isInside ? 'อยู่ภายใน' : 'ออกแล้ว',
-                  style: AppTextStyles.caption.copyWith(
+      child: Padding(
+        padding: EdgeInsets.all(16.w),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 50.w,
+                  height: 50.h,
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12.r),
+                  ),
+                  child: Icon(
+                    Icons.person_rounded,
                     color: statusColor,
-                    fontWeight: FontWeight.w600,
+                    size: 26.sp,
                   ),
                 ),
+                SizedBox(width: 12.w),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        log['visitor_name'] ?? 'ไม่ระบุ',
+                        style: AppTextStyles.cardTitle,
+                      ),
+                      SizedBox(height: 4.h),
+                      Text(
+                        log['license_plate'] ?? 'ไม่ระบุทะเบียน',
+                        style: AppTextStyles.caption,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
+                  child: Text(
+                    isExited ? 'ออกแล้ว' : 'อยู่ภายใน',
+                    style: AppTextStyles.caption.copyWith(
+                      color: statusColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 12.h),
+            Divider(color: AppColors.divider),
+            SizedBox(height: 12.h),
+            
+            // House Info
+            _buildInfoRow(
+              Icons.home_rounded,
+              'บ้าน ${log['house_number'] ?? 'ไม่ระบุ'} ${log['resident_name'] != null ? '(${log['resident_name']})' : ''}',
+            ),
+            SizedBox(height: 8.h),
+            
+            // Purpose
+            if (log['purpose'] != null)
+              _buildInfoRow(
+                Icons.assignment_rounded,
+                log['purpose'],
+              ),
+            if (log['purpose'] != null) SizedBox(height: 8.h),
+            
+            // Entry Time
+            _buildInfoRow(
+              Icons.login_rounded,
+              'เข้า: ${DateFormat('HH:mm').format(entryTime)} น.',
+              color: AppColors.entry,
+            ),
+            
+            // Exit Time (if exited)
+            if (exitTime != null) ...[
+              SizedBox(height: 8.h),
+              _buildInfoRow(
+                Icons.logout_rounded,
+                'ออก: ${DateFormat('HH:mm').format(exitTime)} น.',
+                color: AppColors.exit,
               ),
             ],
-          ),
-          SizedBox(height: 12.h),
-          Divider(color: AppColors.divider),
-          SizedBox(height: 12.h),
-          _buildInfoRow(
-            Icons.home_rounded,
-            'บ้าน ${history['house_number']} (${history['resident_name']})',
-          ),
-          SizedBox(height: 8.h),
-          _buildInfoRow(
-            Icons.comment_rounded,
-            history['purpose'],
-          ),
-          SizedBox(height: 8.h),
-          _buildInfoRow(
-            Icons.login_rounded,
-            'เข้า: ${DateFormat('HH:mm น.').format(history['entry_time'])}',
-            color: AppColors.entry,
-          ),
-          if (history['exit_time'] != null) ...[
-            SizedBox(height: 8.h),
-            _buildInfoRow(
-              Icons.logout_rounded,
-              'ออก: ${DateFormat('HH:mm น.').format(history['exit_time'])}',
-              color: AppColors.exit,
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -393,7 +469,9 @@ class _VisitorHistoryScreenState extends State<VisitorHistoryScreen> {
         Expanded(
           child: Text(
             text,
-            style: AppTextStyles.bodySmall.copyWith(color: color),
+            style: AppTextStyles.bodySmall.copyWith(
+              color: color,
+            ),
           ),
         ),
       ],

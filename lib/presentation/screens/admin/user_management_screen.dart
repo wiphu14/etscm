@@ -2,200 +2,222 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../data/services/api_service.dart';
 import '../../widgets/custom_card.dart';
-import '../../widgets/custom_button.dart';
-import '../../widgets/custom_text_field.dart';
-import '../../widgets/loading_widget.dart';
 
 class UserManagementScreen extends StatefulWidget {
-  const UserManagementScreen({super.key});
+  const UserManagementScreen({Key? key}) : super(key: key);
 
   @override
   State<UserManagementScreen> createState() => _UserManagementScreenState();
 }
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
-  final bool _isLoading = false;
+  List<Map<String, dynamic>> _users = [];
+  bool _isLoading = true;
+  String? _errorMessage;
 
-  // Mock villages data
-  final List<Map<String, dynamic>> _mockVillages = [
-    {'id': 1, 'village_name': 'หมู่บ้านสวนสยาม 1'},
-    {'id': 2, 'village_name': 'หมู่บ้านมัณฑนา'},
-    {'id': 3, 'village_name': 'หมู่บ้านเมืองทอง'},
-  ];
+  late ApiService _apiService;
 
-  // Mock users data
-  final List<Map<String, dynamic>> _users = [
-    {
-      'id': 1,
-      'username': 'admin',
-      'full_name': 'ผู้ดูแลระบบ',
-      'email': 'admin@village.com',
-      'phone': '081-234-5678',
-      'role': 'admin',
-      'village_id': null,
-      'is_active': true,
-    },
-    {
-      'id': 2,
-      'username': 'user001',
-      'full_name': 'สมชาย ใจดี',
-      'email': 'somchai@village.com',
-      'phone': '081-111-2222',
-      'role': 'user',
-      'village_id': 1,
-      'village_name': 'หมู่บ้านสวนสยาม 1',
-      'is_active': true,
-    },
-    {
-      'id': 3,
-      'username': 'user002',
-      'full_name': 'สมหญิง รักงาน',
-      'email': 'somying@village.com',
-      'phone': '081-333-4444',
-      'role': 'user',
-      'village_id': 2,
-      'village_name': 'หมู่บ้านมัณฑนา',
-      'is_active': true,
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _apiService = ApiService();
+    _loadUsers();
+  }
 
-  String _selectedFilter = 'all';
+  Future<void> _loadUsers() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
-  List<Map<String, dynamic>> get filteredUsers {
-    if (_selectedFilter == 'all') return _users;
-    return _users.where((user) => user['role'] == _selectedFilter).toList();
+    try {
+      debugPrint('🔵 กำลังโหลดรายการผู้ใช้...');
+      
+      final response = await _apiService.get('/users/index.php');
+      final responseData = response.data;
+      
+      debugPrint('🟢 Users Response: $responseData');
+
+      if (responseData != null && responseData['success'] == true) {
+        final users = responseData['data'] as List<dynamic>? ?? [];
+        
+        debugPrint('🟢 โหลดผู้ใช้สำเร็จ: ${users.length} รายการ');
+
+        if (mounted) {
+          setState(() {
+            _users = List<Map<String, dynamic>>.from(users);
+            _isLoading = false;
+          });
+        }
+      } else {
+        throw Exception(responseData?['message'] ?? 'โหลดข้อมูลไม่สำเร็จ');
+      }
+    } catch (e) {
+      debugPrint('🔴 โหลดผู้ใช้ไม่สำเร็จ: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = e.toString();
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('จัดการผู้ใช้', style: AppTextStyles.appBarTitle),
-        flexibleSpace: Container(
-          decoration: BoxDecoration(gradient: AppColors.primaryGradient),
+        title: Text(
+          'จัดการผู้ใช้',
+          style: AppTextStyles.h4.copyWith(color: Colors.white),
         ),
+        backgroundColor: AppColors.accent,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_rounded, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        iconTheme: IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            icon: Icon(Icons.add_rounded, color: Colors.white, size: 28.sp),
-            onPressed: () => _showAddEditDialog(),
+            icon: Icon(Icons.refresh_rounded),
+            onPressed: _loadUsers,
+            tooltip: 'รีเฟรช',
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildFilterTabs(),
-          Expanded(
-            child: _isLoading
-                ? LoadingWidget(message: 'กำลังโหลดข้อมูล...')
-                : filteredUsers.isEmpty
-                    ? EmptyStateWidget(
-                        icon: Icons.people_rounded,
-                        title: 'ยังไม่มีผู้ใช้',
-                        subtitle: 'เพิ่มผู้ใช้ใหม่โดยกดปุ่ม + ด้านบน',
-                      )
-                    : ListView.builder(
-                        padding: EdgeInsets.all(16.w),
-                        itemCount: filteredUsers.length,
-                        itemBuilder: (context, index) {
-                          final user = filteredUsers[index];
-                          return _buildUserCard(user);
-                        },
-                      ),
-          ),
-        ],
+      body: _buildBody(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddUserDialog(),
+        backgroundColor: AppColors.accent,
+        child: Icon(Icons.person_add_rounded, color: Colors.white),
       ),
     );
   }
 
-  Widget _buildFilterTabs() {
-    return Container(
-      padding: EdgeInsets.all(16.w),
-      color: AppColors.background,
-      child: Row(
-        children: [
-          _buildFilterChip('ทั้งหมด', 'all', _users.length),
-          SizedBox(width: 8.w),
-          _buildFilterChip(
-            'Admin',
-            'admin',
-            _users.where((u) => u['role'] == 'admin').length,
-          ),
-          SizedBox(width: 8.w),
-          _buildFilterChip(
-            'User',
-            'user',
-            _users.where((u) => u['role'] == 'user').length,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String label, String value, int count) {
-    final isSelected = _selectedFilter == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _selectedFilter = value),
-        child: Container(
-          padding: EdgeInsets.symmetric(vertical: 12.h),
-          decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : AppColors.cardBackground,
-            borderRadius: BorderRadius.circular(12.r),
-            border: Border.all(
-              color: isSelected ? AppColors.primary : AppColors.border,
-            ),
-          ),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: AppTextStyles.bodyMedium.copyWith(
-                  color: isSelected ? Colors.white : AppColors.textPrimary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              SizedBox(height: 4.h),
-              Text(
-                '$count',
-                style: AppTextStyles.caption.copyWith(
-                  color: isSelected ? Colors.white : AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
+  Widget _buildBody() {
+    if (_isLoading) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16.h),
+            Text('กำลังโหลดข้อมูล...', style: AppTextStyles.bodyMedium),
+          ],
         ),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline_rounded, size: 64.sp, color: AppColors.error),
+            SizedBox(height: 16.h),
+            Text('เกิดข้อผิดพลาด', style: AppTextStyles.h4),
+            SizedBox(height: 8.h),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32.w),
+              child: Text(
+                _errorMessage!,
+                style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            SizedBox(height: 16.h),
+            ElevatedButton.icon(
+              onPressed: _loadUsers,
+              icon: Icon(Icons.refresh_rounded),
+              label: Text('ลองใหม่'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_users.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.people_outline_rounded, size: 64.sp, color: AppColors.textSecondary),
+            SizedBox(height: 16.h),
+            Text('ไม่พบข้อมูลผู้ใช้', style: AppTextStyles.h4),
+            SizedBox(height: 8.h),
+            Text(
+              'กดปุ่ม + เพื่อเพิ่มผู้ใช้ใหม่',
+              style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadUsers,
+      child: ListView.builder(
+        padding: EdgeInsets.all(16.w),
+        itemCount: _users.length,
+        itemBuilder: (context, index) {
+          final user = _users[index];
+          return _buildUserCard(user);
+        },
       ),
     );
   }
 
   Widget _buildUserCard(Map<String, dynamic> user) {
-    final isAdmin = user['role'] == 'admin';
-    final roleColor = isAdmin ? AppColors.admin : AppColors.user;
-
+    final isActive = user['is_active'] == true || user['status'] == 'active';
+    final role = user['role'] ?? 'user';
+    
+    Color roleColor;
+    String roleText;
+    IconData roleIcon;
+    
+    switch (role) {
+      case 'admin':
+        roleColor = AppColors.error;
+        roleText = 'ผู้ดูแลระบบ';
+        roleIcon = Icons.admin_panel_settings_rounded;
+        break;
+      case 'manager':
+        roleColor = AppColors.warning;
+        roleText = 'ผู้จัดการ';
+        roleIcon = Icons.manage_accounts_rounded;
+        break;
+      case 'guard':
+        roleColor = AppColors.info;
+        roleText = 'รปภ.';
+        roleIcon = Icons.security_rounded;
+        break;
+      default:
+        roleColor = AppColors.success;
+        roleText = 'ผู้ใช้งาน';
+        roleIcon = Icons.person_rounded;
+    }
+    
     return CustomCard(
       margin: EdgeInsets.only(bottom: 12.h),
+      padding: EdgeInsets.all(16.w),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 50.w,
-                height: 50.h,
+                width: 48.w,
+                height: 48.h,
                 decoration: BoxDecoration(
-                  color: roleColor.withValues(alpha: 0.1),
+                  color: roleColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12.r),
                 ),
                 child: Icon(
-                  isAdmin ? Icons.admin_panel_settings_rounded : Icons.person_rounded,
+                  roleIcon,
                   color: roleColor,
-                  size: 26.sp,
+                  size: 24.sp,
                 ),
               ),
               SizedBox(width: 12.w),
@@ -203,354 +225,280 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(
+                      user['full_name'] ?? user['username'] ?? 'ไม่ระบุ',
+                      style: AppTextStyles.bodyMedium.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 4.h),
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            user['full_name'],
-                            style: AppTextStyles.cardTitle,
-                          ),
-                        ),
                         Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8.w,
-                            vertical: 4.h,
-                          ),
+                          padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
                           decoration: BoxDecoration(
-                            color: roleColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6.r),
+                            color: roleColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4.r),
                           ),
                           child: Text(
-                            isAdmin ? 'Admin' : 'User',
+                            roleText,
                             style: AppTextStyles.caption.copyWith(
                               color: roleColor,
                               fontWeight: FontWeight.w600,
+                              fontSize: 10.sp,
                             ),
                           ),
                         ),
+                        SizedBox(width: 8.w),
+                        Text(
+                          '@${user['username'] ?? '-'}',
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                       ],
-                    ),
-                    SizedBox(height: 4.h),
-                    Text(
-                      '@${user['username']}',
-                      style: AppTextStyles.caption,
                     ),
                   ],
                 ),
               ),
-              PopupMenuButton(
-                icon: Icon(Icons.more_vert_rounded, color: AppColors.textSecondary),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12.r),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                decoration: BoxDecoration(
+                  color: isActive ? AppColors.success.withOpacity(0.1) : AppColors.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8.r),
                 ),
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit_rounded, size: 20.sp, color: AppColors.primary),
-                        SizedBox(width: 8.w),
-                        Text('แก้ไข', style: AppTextStyles.bodyMedium),
-                      ],
-                    ),
-                    onTap: () {
-                      Future.delayed(
-                        Duration.zero,
-                        () => _showAddEditDialog(user: user),
-                      );
-                    },
+                child: Text(
+                  isActive ? 'ใช้งาน' : 'ปิดใช้งาน',
+                  style: AppTextStyles.caption.copyWith(
+                    color: isActive ? AppColors.success : AppColors.error,
+                    fontWeight: FontWeight.w600,
                   ),
-                  if (!isAdmin)
-                    PopupMenuItem(
-                      child: Row(
-                        children: [
-                          Icon(Icons.block_rounded, size: 20.sp, color: AppColors.warning),
-                          SizedBox(width: 8.w),
-                          Text('ระงับ', style: AppTextStyles.bodyMedium),
-                        ],
-                      ),
-                      onTap: () {
-                        Future.delayed(Duration.zero, () {
-                          setState(() {
-                            user['is_active'] = !(user['is_active'] ?? true);
-                          });
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(user['is_active'] 
-                                    ? 'เปิดใช้งานผู้ใช้แล้ว' 
-                                    : 'ระงับผู้ใช้แล้ว'),
-                                backgroundColor: AppColors.success,
-                              ),
-                            );
-                          }
-                        });
-                      },
-                    ),
-                  PopupMenuItem(
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_rounded, size: 20.sp, color: AppColors.error),
-                        SizedBox(width: 8.w),
-                        Text('ลบ', style: AppTextStyles.bodyMedium),
-                      ],
-                    ),
-                    onTap: () {
-                      Future.delayed(
-                        Duration.zero,
-                        () => _showDeleteDialog(user),
-                      );
-                    },
-                  ),
-                ],
+                ),
               ),
             ],
           ),
           SizedBox(height: 12.h),
-          Divider(color: AppColors.divider),
+          Divider(height: 1),
           SizedBox(height: 12.h),
-          _buildInfoRow(Icons.email_rounded, user['email']),
+          Row(
+            children: [
+              Expanded(
+                child: _buildInfoItem(
+                  icon: Icons.home_work_outlined,
+                  label: 'หมู่บ้าน',
+                  value: user['village_name'] ?? '-',
+                ),
+              ),
+            ],
+          ),
           SizedBox(height: 8.h),
-          _buildInfoRow(Icons.phone_rounded, user['phone']),
-          if (!isAdmin && user['village_name'] != null) ...[
+          Row(
+            children: [
+              Expanded(
+                child: _buildInfoItem(
+                  icon: Icons.email_outlined,
+                  label: 'อีเมล',
+                  value: user['email'] ?? '-',
+                ),
+              ),
+              Expanded(
+                child: _buildInfoItem(
+                  icon: Icons.phone_outlined,
+                  label: 'โทรศัพท์',
+                  value: user['phone'] ?? '-',
+                ),
+              ),
+            ],
+          ),
+          if (user['last_login'] != null) ...[
             SizedBox(height: 8.h),
-            _buildInfoRow(Icons.home_work_rounded, user['village_name']),
+            Row(
+              children: [
+                Icon(Icons.access_time_rounded, size: 14.sp, color: AppColors.textSecondary),
+                SizedBox(width: 4.w),
+                Text(
+                  'เข้าใช้งานล่าสุด: ${_formatDateTime(user['last_login'])}',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
           ],
+          SizedBox(height: 12.h),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => _showEditUserDialog(user),
+                icon: Icon(Icons.edit_rounded, size: 18.sp),
+                label: Text('แก้ไข'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                ),
+              ),
+              SizedBox(width: 8.w),
+              TextButton.icon(
+                onPressed: () => _showDeleteConfirmDialog(user),
+                icon: Icon(Icons.delete_rounded, size: 18.sp),
+                label: Text('ลบ'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.error,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String text) {
+  Widget _buildInfoItem({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
     return Row(
       children: [
-        Icon(icon, size: 18.sp, color: AppColors.textSecondary),
-        SizedBox(width: 8.w),
+        Icon(icon, size: 16.sp, color: AppColors.textSecondary),
+        SizedBox(width: 4.w),
         Expanded(
-          child: Text(text, style: AppTextStyles.bodySmall),
+          child: Text(
+            value,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textSecondary,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ],
     );
   }
 
-  void _showAddEditDialog({Map<String, dynamic>? user}) {
+  String _formatDateTime(String? dateTime) {
+    if (dateTime == null || dateTime.isEmpty) return '-';
+    try {
+      final dt = DateTime.parse(dateTime);
+      return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return dateTime;
+    }
+  }
+
+  void _showAddUserDialog() {
+    _showUserFormDialog(null);
+  }
+
+  void _showEditUserDialog(Map<String, dynamic> user) {
+    _showUserFormDialog(user);
+  }
+
+  void _showUserFormDialog(Map<String, dynamic>? user) {
     final isEdit = user != null;
-    final formKey = GlobalKey<FormState>();
-
-    final usernameController = TextEditingController(text: user?['username']);
-    final fullNameController = TextEditingController(text: user?['full_name']);
-    final emailController = TextEditingController(text: user?['email']);
-    final phoneController = TextEditingController(text: user?['phone']);
+    final usernameController = TextEditingController(text: user?['username'] ?? '');
+    final fullNameController = TextEditingController(text: user?['full_name'] ?? '');
+    final emailController = TextEditingController(text: user?['email'] ?? '');
+    final phoneController = TextEditingController(text: user?['phone'] ?? '');
     final passwordController = TextEditingController();
-
     String selectedRole = user?['role'] ?? 'user';
-    int? selectedVillageId = user?['village_id'];
 
     showDialog(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
+      builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-          title: Row(
-            children: [
-              Icon(
-                isEdit ? Icons.edit_rounded : Icons.add_rounded,
-                color: AppColors.primary,
-              ),
-              SizedBox(width: 8.w),
-              Text(
-                isEdit ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้ใหม่',
-                style: AppTextStyles.h4,
-              ),
-            ],
-          ),
+          title: Text(isEdit ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้ใหม่', style: AppTextStyles.h4),
           content: SingleChildScrollView(
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CustomTextField(
-                    controller: usernameController,
-                    label: 'ชื่อผู้ใช้',
-                    hint: 'Username',
-                    prefixIcon: Icons.person_rounded,
-                    validator: (v) => v?.isEmpty ?? true ? 'กรุณากรอก' : null,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: usernameController,
+                  decoration: InputDecoration(
+                    labelText: 'ชื่อผู้ใช้ *',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
                   ),
-                  SizedBox(height: 12.h),
-                  CustomTextField(
-                    controller: fullNameController,
-                    label: 'ชื่อ-นามสกุล',
-                    hint: 'Full Name',
-                    prefixIcon: Icons.badge_rounded,
-                    validator: (v) => v?.isEmpty ?? true ? 'กรุณากรอก' : null,
+                  enabled: !isEdit, // ไม่ให้แก้ไข username
+                ),
+                SizedBox(height: 12.h),
+                TextField(
+                  controller: fullNameController,
+                  decoration: InputDecoration(
+                    labelText: 'ชื่อ-นามสกุล *',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
                   ),
-                  SizedBox(height: 12.h),
-                  CustomTextField(
-                    controller: emailController,
-                    label: 'อีเมล',
-                    hint: 'Email',
-                    prefixIcon: Icons.email_rounded,
-                    keyboardType: TextInputType.emailAddress,
+                ),
+                SizedBox(height: 12.h),
+                TextField(
+                  controller: emailController,
+                  decoration: InputDecoration(
+                    labelText: 'อีเมล',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
                   ),
-                  SizedBox(height: 12.h),
-                  CustomTextField(
-                    controller: phoneController,
-                    label: 'เบอร์โทร',
-                    hint: 'Phone',
-                    prefixIcon: Icons.phone_rounded,
-                    keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                SizedBox(height: 12.h),
+                TextField(
+                  controller: phoneController,
+                  decoration: InputDecoration(
+                    labelText: 'โทรศัพท์',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
                   ),
-                  SizedBox(height: 12.h),
-                  if (!isEdit)
-                    CustomTextField(
-                      controller: passwordController,
-                      label: 'รหัสผ่าน',
-                      hint: 'Password',
-                      prefixIcon: Icons.lock_rounded,
-                      obscureText: true,
-                      validator: (v) => v?.isEmpty ?? true ? 'กรุณากรอก' : null,
-                    ),
-                  SizedBox(height: 12.h),
-                  
-                  // Role Selection
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Role', style: AppTextStyles.label),
-                      SizedBox(height: 8.h),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setDialogState(() => selectedRole = 'admin'),
-                              child: Container(
-                                padding: EdgeInsets.all(12.w),
-                                decoration: BoxDecoration(
-                                  color: selectedRole == 'admin'
-                                      ? AppColors.admin.withValues(alpha: 0.1)
-                                      : AppColors.surfaceLight,
-                                  borderRadius: BorderRadius.circular(8.r),
-                                  border: Border.all(
-                                    color: selectedRole == 'admin'
-                                        ? AppColors.admin
-                                        : AppColors.border,
-                                  ),
-                                ),
-                                child: Text(
-                                  'Admin',
-                                  style: AppTextStyles.bodyMedium.copyWith(
-                                    color: selectedRole == 'admin'
-                                        ? AppColors.admin
-                                        : AppColors.textSecondary,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: 8.w),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setDialogState(() => selectedRole = 'user'),
-                              child: Container(
-                                padding: EdgeInsets.all(12.w),
-                                decoration: BoxDecoration(
-                                  color: selectedRole == 'user'
-                                      ? AppColors.user.withValues(alpha: 0.1)
-                                      : AppColors.surfaceLight,
-                                  borderRadius: BorderRadius.circular(8.r),
-                                  border: Border.all(
-                                    color: selectedRole == 'user'
-                                        ? AppColors.user
-                                        : AppColors.border,
-                                  ),
-                                ),
-                                child: Text(
-                                  'User',
-                                  style: AppTextStyles.bodyMedium.copyWith(
-                                    color: selectedRole == 'user'
-                                        ? AppColors.user
-                                        : AppColors.textSecondary,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                  keyboardType: TextInputType.phone,
+                ),
+                SizedBox(height: 12.h),
+                DropdownButtonFormField<String>(
+                  value: selectedRole,
+                  decoration: InputDecoration(
+                    labelText: 'บทบาท',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
                   ),
-
-                  // Village Selection (for User only)
-                  if (selectedRole == 'user') ...[
-                    SizedBox(height: 12.h),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('หมู่บ้าน', style: AppTextStyles.label),
-                        SizedBox(height: 8.h),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 16.w,
-                            vertical: 4.h,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.cardBackground,
-                            borderRadius: BorderRadius.circular(12.r),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: selectedVillageId,
-                              hint: Text('เลือกหมู่บ้าน', style: AppTextStyles.hint),
-                              isExpanded: true,
-                              items: _mockVillages.map((village) {
-                                return DropdownMenuItem<int>(
-                                  value: village['id'],
-                                  child: Text(
-                                    village['village_name'] ?? '',
-                                    style: AppTextStyles.bodyMedium,
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (value) {
-                                setDialogState(() => selectedVillageId = value);
-                              },
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  items: [
+                    DropdownMenuItem(value: 'admin', child: Text('ผู้ดูแลระบบ')),
+                    DropdownMenuItem(value: 'manager', child: Text('ผู้จัดการ')),
+                    DropdownMenuItem(value: 'guard', child: Text('รปภ.')),
+                    DropdownMenuItem(value: 'user', child: Text('ผู้ใช้งาน')),
                   ],
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selectedRole = value ?? 'user';
+                    });
+                  },
+                ),
+                if (!isEdit) ...[
+                  SizedBox(height: 12.h),
+                  TextField(
+                    controller: passwordController,
+                    decoration: InputDecoration(
+                      labelText: 'รหัสผ่าน *',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
+                    ),
+                    obscureText: true,
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text('ยกเลิก', style: AppTextStyles.button.copyWith(
-                color: AppColors.textSecondary,
-              )),
+              onPressed: () => Navigator.pop(context),
+              child: Text('ยกเลิก'),
             ),
-            CustomButton(
-              text: isEdit ? 'บันทึก' : 'เพิ่ม',
+            ElevatedButton(
               onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(dialogContext);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(isEdit ? 'แก้ไขข้อมูลสำเร็จ' : 'เพิ่มผู้ใช้สำเร็จ'),
-                        backgroundColor: AppColors.success,
-                      ),
-                    );
-                  }
-                }
+                // TODO: Implement save to API
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(isEdit ? 'แก้ไขข้อมูลสำเร็จ' : 'เพิ่มผู้ใช้สำเร็จ'),
+                    backgroundColor: AppColors.success,
+                  ),
+                );
+                _loadUsers();
               },
-              type: ButtonType.success,
-              height: 45.h,
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+              child: Text(isEdit ? 'บันทึก' : 'เพิ่ม'),
             ),
           ],
         ),
@@ -558,44 +506,35 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  void _showDeleteDialog(Map<String, dynamic> user) {
+  void _showDeleteConfirmDialog(Map<String, dynamic> user) {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: Row(
-          children: [
-            Icon(Icons.warning_rounded, color: AppColors.error),
-            SizedBox(width: 8.w),
-            Text('ยืนยันการลบ', style: AppTextStyles.h4),
-          ],
-        ),
+        title: Text('ยืนยันการลบ', style: AppTextStyles.h4),
         content: Text(
-          'คุณต้องการลบผู้ใช้ "${user['full_name']}" ใช่หรือไม่?',
+          'คุณต้องการลบผู้ใช้ "${user['full_name'] ?? user['username']}" ใช่หรือไม่?',
           style: AppTextStyles.bodyMedium,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text('ยกเลิก', style: AppTextStyles.button.copyWith(
-              color: AppColors.textSecondary,
-            )),
+            onPressed: () => Navigator.pop(context),
+            child: Text('ยกเลิก'),
           ),
-          CustomButton(
-            text: 'ลบ',
+          ElevatedButton(
             onPressed: () {
-              Navigator.pop(dialogContext);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('ลบผู้ใช้สำเร็จ'),
-                    backgroundColor: AppColors.success,
-                  ),
-                );
-              }
+              // TODO: Implement delete API
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('ลบผู้ใช้สำเร็จ'),
+                  backgroundColor: AppColors.success,
+                ),
+              );
+              _loadUsers();
             },
-            type: ButtonType.error,
-            height: 45.h,
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: Text('ลบ'),
           ),
         ],
       ),

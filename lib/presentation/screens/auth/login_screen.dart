@@ -44,16 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_selectedRole == 'user' && _selectedVillageId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('กรุณาเลือกหมู่บ้าน'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-      return;
-    }
-
+    // ไม่ต้องบังคับเลือกหมู่บ้านสำหรับ user แล้ว
     setState(() => _isLoading = true);
 
     try {
@@ -81,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล'),
+            content: Text(authProvider.errorMessage ?? 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -163,10 +154,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             
                             SizedBox(height: 20.h),
                             
-                            if (_selectedRole == 'user')
+                            // ซ่อน dropdown หมู่บ้านเมื่อเลือก Tab เจ้าหน้าที่ (user)
+                            // แสดงเฉพาะเมื่อเลือก admin
+                            if (_selectedRole == 'admin')
                               _buildVillageSelector(),
                             
-                            if (_selectedRole == 'user')
+                            if (_selectedRole == 'admin')
                               SizedBox(height: 20.h),
                             
                             CustomTextField(
@@ -237,10 +230,10 @@ class _LoginScreenState extends State<LoginScreen> {
           width: 100.w,
           height: 100.h,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.2),
+            color: Colors.white.withOpacity(0.2),
             shape: BoxShape.circle,
             border: Border.all(
-              color: Colors.white.withValues(alpha: 0.3),
+              color: Colors.white.withOpacity(0.3),
               width: 3,
             ),
           ),
@@ -262,7 +255,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Text(
           'Village Entry System',
           style: AppTextStyles.bodyMedium.copyWith(
-            color: Colors.white.withValues(alpha: 0.9),
+            color: Colors.white.withOpacity(0.9),
           ),
         ),
       ],
@@ -309,11 +302,17 @@ class _LoginScreenState extends State<LoginScreen> {
     final isSelected = _selectedRole == role;
     
     return GestureDetector(
-      onTap: () => setState(() => _selectedRole = role),
+      onTap: () {
+        setState(() {
+          _selectedRole = role;
+          // Reset village selection เมื่อเปลี่ยน role
+          _selectedVillageId = null;
+        });
+      },
       child: Container(
         padding: EdgeInsets.all(16.w),
         decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.1) : AppColors.surfaceLight,
+          color: isSelected ? color.withOpacity(0.1) : AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(12.r),
           border: Border.all(
             color: isSelected ? color : AppColors.border,
@@ -362,14 +361,14 @@ class _LoginScreenState extends State<LoginScreen> {
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<int>(
                   value: _selectedVillageId,
-                  hint: Text('เลือกหมู่บ้าน', style: AppTextStyles.hint),
+                  hint: Text('เลือกหมู่บ้าน (ไม่บังคับ)', style: AppTextStyles.hint),
                   isExpanded: true,
                   icon: Icon(Icons.arrow_drop_down, color: AppColors.primary),
                   items: villages.map((village) {
                     return DropdownMenuItem<int>(
-                      value: village['id'],
+                      value: village['id'] ?? village['village_id'],
                       child: Text(
-                        village['village_name'],
+                        village['village_name'] ?? village['name'] ?? '',
                         style: AppTextStyles.bodyMedium,
                       ),
                     );
@@ -410,11 +409,11 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           SizedBox(height: 8.h),
           Text(
-            'Admin: username: admin | password: admin123',
+            'Admin: username: admin | password: 123456',
             style: AppTextStyles.caption,
           ),
           Text(
-            'User: username: user001 | password: admin123',
+            'User: username: guard001 | password: 123456',
             style: AppTextStyles.caption,
           ),
         ],

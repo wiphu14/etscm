@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../data/services/api_service.dart';
+import '../../../data/repositories/entry_log_repository.dart';
 import '../../widgets/custom_card.dart';
 import '../../providers/auth_provider.dart';
 import '../auth/login_screen.dart';
@@ -12,44 +14,98 @@ import 'visitor_exit_screen.dart';
 import 'visitor_history_screen.dart';
 
 class UserDashboardScreen extends StatefulWidget {
-  const UserDashboardScreen({super.key}); // แก้ไข error ที่ 1
+  const UserDashboardScreen({super.key});
 
   @override
   State<UserDashboardScreen> createState() => _UserDashboardScreenState();
 }
 
 class _UserDashboardScreenState extends State<UserDashboardScreen> {
-  // Mock statistics for today
-  final Map<String, dynamic> _todayStats = {
-    'total_entries': 15,
-    'total_exits': 8,
-    'current_visitors': 7,
+  // Statistics
+  Map<String, dynamic> _todayStats = {
+    'total_entries': 0,
+    'total_exits': 0,
+    'current_visitors': 0,
   };
 
-  // Mock recent entries
-  final List<Map<String, dynamic>> _recentEntries = [
-    {
-      'visitor_name': 'นายสมชาย ใจดี',
-      'license_plate': 'กข-1234',
-      'house_number': '123/45',
-      'entry_time': DateTime.now().subtract(const Duration(minutes: 30)),
-      'status': 'entry',
-    },
-    {
-      'visitor_name': 'นางสมหญิง รักงาน',
-      'license_plate': 'คค-5678',
-      'house_number': '234/56',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 1)),
-      'status': 'entry',
-    },
-    {
-      'visitor_name': 'นายประยุทธ สุขสม',
-      'license_plate': 'งง-9012',
-      'house_number': '345/67',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 2)),
-      'status': 'exit',
-    },
-  ];
+  // Recent entries
+  List<Map<String, dynamic>> _recentEntries = [];
+  
+  bool _isLoading = true;
+
+  // API Service & Repository
+  late ApiService _apiService;
+  late EntryLogRepository _entryLogRepository;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiService = ApiService();
+    _entryLogRepository = EntryLogRepository(_apiService);
+    _loadDashboardData();
+  }
+
+  Future<void> _loadDashboardData() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final authProvider = context.read<AuthProvider>();
+      
+      debugPrint('🔵 กำลังโหลดข้อมูล Dashboard...');
+      debugPrint('🔵 Village ID: ${authProvider.villageId}');
+
+      // โหลดสถิติ
+      final stats = await _entryLogRepository.getDashboardStats(
+        villageId: authProvider.villageId,
+        date: DateTime.now(),
+      );
+      
+      debugPrint('🟢 Stats: $stats');
+
+      // โหลดรายการล่าสุด
+      final logs = await _entryLogRepository.getLogsByDate(
+        date: DateTime.now(),
+        villageId: authProvider.villageId,
+      );
+      
+      debugPrint('🟢 Recent Logs: ${logs.length} รายการ');
+
+      if (mounted) {
+        setState(() {
+          _todayStats = {
+            'total_entries': stats['today_entries'] ?? stats['total_entries'] ?? 0,
+            'total_exits': stats['today_exits'] ?? stats['total_exits'] ?? 0,
+            'current_visitors': stats['current_inside'] ?? stats['current_visitors'] ?? 0,
+          };
+          
+          _recentEntries = logs.take(5).map((log) {
+            DateTime? entryTime;
+            if (log['entry_time'] != null) {
+              try {
+                entryTime = DateTime.parse(log['entry_time'].toString());
+              } catch (e) {
+                entryTime = DateTime.now();
+              }
+            }
+            
+            return {
+              'visitor_name': log['visitor_name'] ?? log['full_name'] ?? 'ไม่ระบุ',
+              'license_plate': log['license_plate'] ?? 'ไม่ระบุ',
+              'house_number': log['house_number'] ?? 'ไม่ระบุ',
+              'entry_time': entryTime ?? DateTime.now(),
+              'status': log['exit_time'] == null ? 'entry' : 'exit',
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('🔴 โหลดข้อมูล Dashboard ไม่สำเร็จ: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,30 +140,38 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                       topRight: Radius.circular(32.r),
                     ),
                   ),
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(20.w),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(height: 8.h),
+                  child: RefreshIndicator(
+                    onRefresh: _loadDashboardData,
+                    child: SingleChildScrollView(
+                      physics: AlwaysScrollableScrollPhysics(),
+                      padding: EdgeInsets.all(20.w),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(height: 8.h),
 
-                        // Quick Actions
-                        _buildQuickActions(),
+                          // Quick Actions
+                          _buildQuickActions(),
 
-                        SizedBox(height: 24.h),
+                          SizedBox(height: 24.h),
 
-                        // Today Statistics
-                        Text('สถิติวันนี้', style: AppTextStyles.h4),
-                        SizedBox(height: 16.h),
-                        _buildTodayStats(),
+                          // Today Statistics
+                          Text('สถิติวันนี้', style: AppTextStyles.h4),
+                          SizedBox(height: 16.h),
+                          _isLoading
+                              ? Center(child: CircularProgressIndicator())
+                              : _buildTodayStats(),
 
-                        SizedBox(height: 24.h),
+                          SizedBox(height: 24.h),
 
-                        // Recent Activities
-                        _buildRecentActivitiesHeader(),
-                        SizedBox(height: 12.h),
-                        _buildRecentActivities(),
-                      ],
+                          // Recent Activities
+                          _buildRecentActivitiesHeader(),
+                          SizedBox(height: 12.h),
+                          _isLoading
+                              ? Center(child: CircularProgressIndicator())
+                              : _buildRecentActivities(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -130,10 +194,10 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 width: 60.w,
                 height: 60.h,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2), // แก้ไข error ที่ 2
+                  color: Colors.white.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.3), // แก้ไข error ที่ 3
+                    color: Colors.white.withValues(alpha: 0.3),
                     width: 2,
                   ),
                 ),
@@ -149,7 +213,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'สวัสดี, ${authProvider.fullName}',
+                      'สวัสดี, ${authProvider.fullName ?? 'ผู้ใช้'}',
                       style: AppTextStyles.h4.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -161,14 +225,14 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                         Icon(
                           Icons.home_work_rounded,
                           size: 14.sp,
-                          color: Colors.white.withValues(alpha: 0.9), // แก้ไข error ที่ 4
+                          color: Colors.white.withValues(alpha: 0.9),
                         ),
                         SizedBox(width: 4.w),
                         Expanded(
                           child: Text(
                             authProvider.villageName ?? '',
                             style: AppTextStyles.caption.copyWith(
-                              color: Colors.white.withValues(alpha: 0.9), // แก้ไข error ที่ 5
+                              color: Colors.white.withValues(alpha: 0.9),
                             ),
                           ),
                         ),
@@ -193,7 +257,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
           Container(
             padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15), // แก้ไข error ที่ 6
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12.r),
             ),
             child: Row(
@@ -202,7 +266,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 Icon(Icons.calendar_today_rounded, color: Colors.white, size: 16.sp),
                 SizedBox(width: 8.w),
                 Text(
-                  DateFormat('วันEEEที่ d MMM yyyy', 'th').format(DateTime.now()),
+                  DateFormat('วันEEEEที่ d MMMM yyyy', 'th').format(DateTime.now()),
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
@@ -224,11 +288,12 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             icon: Icons.login_rounded,
             label: 'บันทึกเข้า',
             color: AppColors.entry,
-            onTap: () {
-              Navigator.push(
+            onTap: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const VisitorEntryScreen()),
               );
+              _loadDashboardData(); // Refresh หลังกลับมา
             },
           ),
         ),
@@ -238,11 +303,12 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             icon: Icons.logout_rounded,
             label: 'บันทึกออก',
             color: AppColors.exit,
-            onTap: () {
-              Navigator.push(
+            onTap: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const VisitorExitScreen()),
               );
+              _loadDashboardData(); // Refresh หลังกลับมา
             },
           ),
         ),
@@ -256,39 +322,38 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     required Color color,
     required VoidCallback onTap,
   }) {
-    return CustomCard(
+    return GestureDetector(
       onTap: onTap,
-      padding: EdgeInsets.symmetric(vertical: 20.h),
-      child: Column(
-        children: [
-          Container(
-            width: 60.w,
-            height: 60.h,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [color, color.withValues(alpha: 0.7)], // แก้ไข error ที่ 7
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 20.h),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [color, color.withValues(alpha: 0.8)],
+          ),
+          borderRadius: BorderRadius.circular(16.r),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.white, size: 36.sp),
+            SizedBox(height: 8.h),
+            Text(
+              label,
+              style: AppTextStyles.button.copyWith(
+                color: Colors.white,
+                fontSize: 16.sp,
               ),
-              borderRadius: BorderRadius.circular(16.r),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.3), // แก้ไข error ที่ 8
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
             ),
-            child: Icon(icon, size: 30.sp, color: Colors.white),
-          ),
-          SizedBox(height: 12.h),
-          Text(
-            label,
-            style: AppTextStyles.bodyMedium.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -340,7 +405,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             width: 40.w,
             height: 40.h,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1), // แก้ไข error ที่ 9
+              color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10.r),
             ),
             child: Icon(icon, color: color, size: 20.sp),
@@ -410,7 +475,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 ),
                 SizedBox(height: 12.h),
                 Text(
-                  'ยังไม่มีกิจกรรม',
+                  'ยังไม่มีกิจกรรมวันนี้',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.textSecondary,
                   ),
@@ -443,7 +508,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             width: 40.w,
             height: 40.h,
             decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.1), // แก้ไข error ที่ 10
+              color: statusColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10.r),
             ),
             child: Icon(
@@ -477,7 +542,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
                 decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1), // แก้ไข error ที่ 11
+                  color: statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(6.r),
                 ),
                 child: Text(
@@ -516,7 +581,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   void _showLogoutDialog() {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog( // เปลี่ยนชื่อ parameter เป็น dialogContext
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
         title: Text('ออกจากระบบ', style: AppTextStyles.h4),
         content: Text(
@@ -525,16 +590,16 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext), // ใช้ dialogContext
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('ยกเลิก', style: AppTextStyles.button.copyWith(
               color: AppColors.textSecondary,
             )),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(dialogContext); // ปิด dialog ก่อน
-              await context.read<AuthProvider>().logout(); // แก้ไข error ที่ 12
-              if (mounted) { // ตรวจสอบ mounted
+              Navigator.pop(dialogContext);
+              await context.read<AuthProvider>().logout();
+              if (mounted) {
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (_) => const LoginScreen()),

@@ -5,12 +5,14 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/utils/print_helper.dart';
+import '../../../data/services/api_service.dart';
+import '../../../data/repositories/entry_log_repository.dart';
 import '../../widgets/custom_card.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../widgets/loading_widget.dart';
 import '../../providers/auth_provider.dart';
-import '../qr_scanner/qr_scanner_screen.dart'; // เพิ่มบรรทัดนี้
+import '../qr_scanner/qr_scanner_screen.dart';
 
 class VisitorExitScreen extends StatefulWidget {
   const VisitorExitScreen({super.key});
@@ -25,35 +27,73 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
 
   bool _isSearching = false;
   bool _isLoading = false;
+  bool _isLoadingList = true;
   Map<String, dynamic>? _selectedVisitor;
+  
+  List<Map<String, dynamic>> _currentVisitors = [];
 
-  // Mock current visitors
-  final List<Map<String, dynamic>> _currentVisitors = [
-    {
-      'id': 1,
-      'visitor_code': 'VIS1728475800001',
-      'visitor_name': 'นายสมชาย ใจดี',
-      'phone': '081-111-2222',
-      'license_plate': 'กข-1234',
-      'vehicle_type': 'รถยนต์',
-      'house_number': '123/45',
-      'resident_name': 'นายสมหมาย รักดี',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 2)),
-      'purpose': 'มาเยี่ยมบ้าน',
-    },
-    {
-      'id': 2,
-      'visitor_code': 'VIS1728475800002',
-      'visitor_name': 'นางสมหญิง รักงาน',
-      'phone': '081-333-4444',
-      'license_plate': 'คค-5678',
-      'vehicle_type': 'มอเตอร์ไซค์',
-      'house_number': '234/56',
-      'resident_name': 'นางสาวสมใจ ใจงาม',
-      'entry_time': DateTime.now().subtract(const Duration(hours: 1)),
-      'purpose': 'ส่งของ',
-    },
-  ];
+  // API Service & Repository
+  late ApiService _apiService;
+  late EntryLogRepository _entryLogRepository;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiService = ApiService();
+    _entryLogRepository = EntryLogRepository(_apiService);
+    _loadCurrentVisitors();
+  }
+
+  Future<void> _loadCurrentVisitors() async {
+    setState(() => _isLoadingList = true);
+    
+    try {
+      final authProvider = context.read<AuthProvider>();
+      
+      debugPrint('🔵 กำลังโหลดรายชื่อผู้อยู่ภายใน...');
+      debugPrint('🔵 Village ID: ${authProvider.villageId}');
+      
+      final visitors = await _entryLogRepository.getCurrentVisitors(
+        villageId: authProvider.villageId,
+      );
+      
+      debugPrint('🟢 พบผู้อยู่ภายใน ${visitors.length} คน');
+      
+      setState(() {
+        _currentVisitors = visitors.map((v) {
+          // แปลง entry_time จาก String เป็น DateTime
+          DateTime? entryTime;
+          if (v['entry_time'] != null) {
+            try {
+              entryTime = DateTime.parse(v['entry_time'].toString());
+            } catch (e) {
+              entryTime = DateTime.now();
+            }
+          }
+          
+          return {
+            ...v,
+            'entry_time': entryTime ?? DateTime.now(),
+            'visitor_name': v['visitor_name'] ?? v['full_name'] ?? 'ไม่ระบุ',
+          };
+        }).toList();
+      });
+    } catch (e) {
+      debugPrint('🔴 โหลดรายชื่อไม่สำเร็จ: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('ไม่สามารถโหลดรายชื่อได้: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingList = false);
+      }
+    }
+  }
 
   List<Map<String, dynamic>> get filteredVisitors {
     if (_searchController.text.isEmpty) {
@@ -66,7 +106,7 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
       final name = (visitor['visitor_name'] ?? '').toString().toLowerCase();
       final plate = (visitor['license_plate'] ?? '').toString().toLowerCase();
       final house = (visitor['house_number'] ?? '').toString().toLowerCase();
-      final code = (visitor['visitor_code'] ?? '').toString().toLowerCase();
+      final code = (visitor['qr_code'] ?? visitor['visitor_code'] ?? '').toString().toLowerCase();
       
       return name.contains(query) || 
              plate.contains(query) || 
@@ -82,7 +122,6 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
     super.dispose();
   }
 
-  // ✅ เพิ่มฟังก์ชัน Scan QR Code
   Future<void> _scanQRCode() async {
     try {
       final String? scannedCode = await Navigator.push<String>(
@@ -91,17 +130,14 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
       );
 
       if (scannedCode != null && scannedCode.isNotEmpty) {
-        // ค้นหาผู้เข้าจากรหัส QR Code
         _searchController.text = scannedCode;
         setState(() {});
 
-        // ถ้าเจอเพียงคนเดียว ให้เลือกอัตโนมัติ
         if (filteredVisitors.length == 1) {
           setState(() {
             _selectedVisitor = filteredVisitors.first;
           });
 
-          // แสดง SnackBar
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('✅ พบผู้เข้า: ${filteredVisitors.first['visitor_name']}'),
@@ -110,7 +146,6 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
             ),
           );
         } else if (filteredVisitors.isEmpty) {
-          // ไม่เจอ
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('❌ ไม่พบรหัส QR Code นี้ในระบบ'),
@@ -149,35 +184,65 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
       final authProvider = context.read<AuthProvider>();
       final exitTime = DateTime.now();
       
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 2));
+      final qrCode = _selectedVisitor!['qr_code'] ?? _selectedVisitor!['visitor_code'] ?? '';
+      
+      debugPrint('🔵 ========================================');
+      debugPrint('🔵 เริ่มบันทึกผู้ออก...');
+      debugPrint('🔵 QR Code: $qrCode');
+      debugPrint('🔵 Visitor: ${_selectedVisitor!['visitor_name']}');
+      debugPrint('🔵 ========================================');
 
-      // TODO: Update exit time in database via API
-
-      // พิมพ์ใบยืนยันออก
-      final printSuccess = await PrintHelper.printExitReceipt(
-        visitorName: _selectedVisitor!['visitor_name'] ?? 'ไม่ระบุ',
-        licensePlate: _selectedVisitor!['license_plate'] ?? 'ไม่ระบุ',
-        houseNumber: _selectedVisitor!['house_number'] ?? 'ไม่ระบุ',
-        entryTime: _selectedVisitor!['entry_time'] ?? DateTime.now(),
-        exitTime: exitTime,
-        villageName: authProvider.villageName ?? '',
-        staffName: authProvider.fullName ?? '',
+      // เรียก API บันทึกออก
+      final result = await _entryLogRepository.createExitSunmi(
+        qrCode: qrCode,
+        notes: _notesController.text.isEmpty ? null : _notesController.text,
       );
 
-      if (!printSuccess && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⚠️ บันทึกสำเร็จ แต่ไม่สามารถพิมพ์ได้'),
-            backgroundColor: AppColors.warning,
-          ),
-        );
-      }
+      debugPrint('🟡 API Response: $result');
 
-      if (mounted) {
-        _showSuccessDialog();
+      if (result['success'] == true) {
+        debugPrint('🟢 บันทึกออกสำเร็จ!');
+        
+        // พิมพ์ใบยืนยันออก
+        final printSuccess = await PrintHelper.printExitReceipt(
+          visitorName: _selectedVisitor!['visitor_name'] ?? 'ไม่ระบุ',
+          licensePlate: _selectedVisitor!['license_plate'] ?? 'ไม่ระบุ',
+          houseNumber: _selectedVisitor!['house_number'] ?? 'ไม่ระบุ',
+          entryTime: _selectedVisitor!['entry_time'] ?? DateTime.now(),
+          exitTime: exitTime,
+          villageName: authProvider.villageName ?? '',
+          staffName: authProvider.fullName ?? '',
+        );
+
+        if (!printSuccess && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ บันทึกสำเร็จ แต่ไม่สามารถพิมพ์ได้'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+        }
+
+        if (mounted) {
+          _showSuccessDialog();
+        }
+      } else {
+        debugPrint('🔴 บันทึกออกไม่สำเร็จ: ${result['message']}');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ ${result['message'] ?? 'บันทึกไม่สำเร็จ'}'),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('🔴 ========================================');
+      debugPrint('🔴 Error: $e');
+      debugPrint('🔴 Stack Trace: $stackTrace');
+      debugPrint('🔴 ========================================');
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -239,52 +304,61 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
               padding: EdgeInsets.all(12.w),
               decoration: BoxDecoration(
                 color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(12.r),
+                borderRadius: BorderRadius.circular(8.r),
               ),
               child: Column(
                 children: [
                   Text(
-                    '⏱️ ระยะเวลาที่อยู่',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textSecondary,
+                    _selectedVisitor!['visitor_name'] ?? 'ไม่ระบุ',
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   SizedBox(height: 4.h),
                   Text(
-                    '$hours ชั่วโมง $minutes นาที',
-                    style: AppTextStyles.h4.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    'ระยะเวลาอยู่ภายใน: $hours ชม. $minutes นาที',
+                    style: AppTextStyles.caption,
                   ),
                 ],
               ),
             ),
-            SizedBox(height: 12.h),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.print_rounded, size: 16.sp, color: AppColors.primary),
-                SizedBox(width: 4.w),
-                Text(
-                  'กำลังพิมพ์ใบยืนยัน...',
-                  style: AppTextStyles.caption.copyWith(
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
         actions: [
-          CustomButton(
-            text: 'เสร็จสิ้น',
-            onPressed: () {
-              Navigator.pop(context); // Close dialog
-              Navigator.pop(context); // Back to dashboard
-            },
-            type: ButtonType.error,
-            isFullWidth: true,
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pop(context);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(vertical: 12.h),
+                  ),
+                  child: Text('กลับหน้าหลัก'),
+                ),
+              ),
+              SizedBox(width: 12.w),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    setState(() {
+                      _selectedVisitor = null;
+                      _notesController.clear();
+                      _searchController.clear();
+                    });
+                    _loadCurrentVisitors();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.exit,
+                    padding: EdgeInsets.symmetric(vertical: 12.h),
+                  ),
+                  child: Text('บันทึกคนต่อไป', style: TextStyle(color: Colors.white)),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -295,70 +369,96 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('บันทึกผู้ออก', style: AppTextStyles.appBarTitle),
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [AppColors.exit, AppColors.exit.withValues(alpha: 0.8)],
-            ),
-          ),
-        ),
+        title: Text('บันทึกผู้ออก', style: AppTextStyles.h4.copyWith(color: Colors.white)),
+        backgroundColor: AppColors.exit,
         elevation: 0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_rounded, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        // ✅ เพิ่มปุ่ม Scan QR Code ใน AppBar
         actions: [
           IconButton(
-            icon: Icon(Icons.qr_code_scanner_rounded, color: Colors.white, size: 28.sp),
-            onPressed: _scanQRCode,
-            tooltip: 'Scan QR Code',
+            icon: Icon(Icons.refresh_rounded, color: Colors.white),
+            onPressed: _loadCurrentVisitors,
           ),
         ],
       ),
       body: Column(
         children: [
-          // Search Bar พร้อมปุ่ม Scan
+          // Search Bar
           Container(
             padding: EdgeInsets.all(16.w),
-            color: AppColors.background,
+            color: AppColors.exit,
             child: Row(
               children: [
                 Expanded(
-                  child: CustomTextField(
-                    controller: _searchController,
-                    hint: 'ค้นหาด้วย ชื่อ, ทะเบียน, บ้านเลขที่, QR Code',
-                    prefixIcon: Icons.search_rounded,
-                    onChanged: (value) => setState(() {}),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12.r),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (value) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'ค้นหาชื่อ, ทะเบียน, บ้านเลขที่...',
+                        hintStyle: AppTextStyles.hint,
+                        prefixIcon: Icon(Icons.search_rounded, color: AppColors.textHint),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(Icons.clear_rounded, color: AppColors.textHint),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                              )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 14.h),
+                      ),
+                    ),
                   ),
                 ),
-                SizedBox(width: 8.w),
-                // ✅ ปุ่ม Scan QR Code
+                SizedBox(width: 12.w),
                 Container(
-                  height: 54.h,
-                  width: 54.w,
                   decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(12.r),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.3),
-                        blurRadius: 8,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
                   ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _scanQRCode,
-                      borderRadius: BorderRadius.circular(12.r),
-                      child: Icon(
-                        Icons.qr_code_scanner_rounded,
-                        color: Colors.white,
-                        size: 28.sp,
-                      ),
+                  child: IconButton(
+                    icon: Icon(Icons.qr_code_scanner_rounded, color: AppColors.exit),
+                    onPressed: _scanQRCode,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Count
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
+            color: AppColors.surfaceLight,
+            child: Row(
+              children: [
+                Icon(Icons.people_rounded, size: 18.sp, color: AppColors.textSecondary),
+                SizedBox(width: 8.w),
+                Text(
+                  'ผู้อยู่ภายในทั้งหมด',
+                  style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                ),
+                Spacer(),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 4.h),
+                  decoration: BoxDecoration(
+                    color: AppColors.info.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6.r),
+                  ),
+                  child: Text(
+                    '${filteredVisitors.length} คน',
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.info,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -366,47 +466,12 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
             ),
           ),
 
-          // Info Card
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 16.w),
-            child: CustomCard(
-              padding: EdgeInsets.all(12.w),
-              color: AppColors.surfaceLight,
-              child: Row(
-                children: [
-                  Icon(Icons.info_rounded, color: AppColors.info, size: 20.sp),
-                  SizedBox(width: 8.w),
-                  Expanded(
-                    child: Text(
-                      'เลือกผู้ที่ต้องการบันทึกออก หรือ Scan QR Code',
-                      style: AppTextStyles.bodySmall,
-                    ),
-                  ),
-                  Container(
-                    padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
-                    decoration: BoxDecoration(
-                      color: AppColors.info.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6.r),
-                    ),
-                    child: Text(
-                      '${filteredVisitors.length} คน',
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.info,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
           SizedBox(height: 8.h),
 
           // Visitors List
           Expanded(
-            child: _isSearching
-                ? LoadingWidget(message: 'กำลังค้นหา...')
+            child: _isLoadingList
+                ? LoadingWidget(message: 'กำลังโหลด...')
                 : filteredVisitors.isEmpty
                     ? EmptyStateWidget(
                         icon: Icons.person_off_rounded,
@@ -415,13 +480,16 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
                             ? 'ไม่มีผู้อยู่ในหมู่บ้านในขณะนี้'
                             : 'ไม่พบผลลัพธ์จากการค้นหา "${_searchController.text}"',
                       )
-                    : ListView.builder(
-                        padding: EdgeInsets.symmetric(horizontal: 16.w),
-                        itemCount: filteredVisitors.length,
-                        itemBuilder: (context, index) {
-                          final visitor = filteredVisitors[index];
-                          return _buildVisitorCard(visitor);
-                        },
+                    : RefreshIndicator(
+                        onRefresh: _loadCurrentVisitors,
+                        child: ListView.builder(
+                          padding: EdgeInsets.symmetric(horizontal: 16.w),
+                          itemCount: filteredVisitors.length,
+                          itemBuilder: (context, index) {
+                            final visitor = filteredVisitors[index];
+                            return _buildVisitorCard(visitor);
+                          },
+                        ),
                       ),
           ),
         ],
@@ -455,8 +523,14 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
   }
 
   Widget _buildVisitorCard(Map<String, dynamic> visitor) {
-    final isSelected = _selectedVisitor?['id'] == visitor['id'];
-    final duration = DateTime.now().difference(visitor['entry_time']);
+    final isSelected = _selectedVisitor?['log_id'] == visitor['log_id'] ||
+                       _selectedVisitor?['id'] == visitor['id'];
+    
+    DateTime entryTime = visitor['entry_time'] is DateTime 
+        ? visitor['entry_time'] 
+        : DateTime.now();
+    
+    final duration = DateTime.now().difference(entryTime);
     final hours = duration.inHours;
     final minutes = duration.inMinutes % 60;
 
@@ -531,11 +605,10 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
                 Divider(color: AppColors.divider),
                 SizedBox(height: 12.h),
                 
-                // QR Code (ถ้ามี)
-                if (visitor['visitor_code'] != null) ...[
+                if (visitor['qr_code'] != null || visitor['visitor_code'] != null) ...[
                   _buildInfoRow(
                     Icons.qr_code_rounded,
-                    'รหัส: ${visitor['visitor_code']}',
+                    'รหัส: ${visitor['qr_code'] ?? visitor['visitor_code']}',
                     color: AppColors.primary,
                   ),
                   SizedBox(height: 8.h),
@@ -543,12 +616,12 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
                 
                 _buildInfoRow(
                   Icons.local_shipping_rounded,
-                  '${visitor['vehicle_type']} ${visitor['license_plate']}',
+                  '${visitor['vehicle_type'] ?? 'ไม่ระบุ'} ${visitor['license_plate'] ?? ''}',
                 ),
                 SizedBox(height: 8.h),
                 _buildInfoRow(
                   Icons.home_rounded,
-                  'บ้าน ${visitor['house_number']} (${visitor['resident_name']})',
+                  'บ้าน ${visitor['house_number'] ?? 'ไม่ระบุ'} ${visitor['resident_name'] != null ? '(${visitor['resident_name']})' : ''}',
                 ),
                 SizedBox(height: 8.h),
                 _buildInfoRow(
@@ -557,7 +630,6 @@ class _VisitorExitScreenState extends State<VisitorExitScreen> {
                   color: hours >= 12 ? AppColors.warning : AppColors.success,
                 ),
                 
-                // แจ้งเตือนถ้าอยู่เกิน 12 ชั่วโมง
                 if (hours >= 12) ...[
                   SizedBox(height: 8.h),
                   Container(

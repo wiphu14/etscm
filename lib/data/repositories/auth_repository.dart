@@ -1,16 +1,12 @@
 import 'package:flutter/foundation.dart';
 import '../services/api_service.dart';
-import '../../core/configs/api_config.dart';
 
 class AuthRepository {
   final ApiService _apiService;
 
   AuthRepository(this._apiService);
 
-  // ============================================
-  // Login - Web/Admin
-  // ============================================
-  
+  /// Login
   Future<Map<String, dynamic>> login({
     required String username,
     required String password,
@@ -19,7 +15,7 @@ class AuthRepository {
   }) async {
     try {
       final response = await _apiService.post(
-        ApiConfig.login,
+        '/auth/login.php',
         data: {
           'username': username,
           'password': password,
@@ -28,170 +24,134 @@ class AuthRepository {
         },
       );
 
-      debugPrint('🟡 Raw API Response: ${response.data}');
+      // response เป็น Dio Response ต้องใช้ .data
+      final responseData = response.data;
+      
+      debugPrint('🟡 Raw API Response: $responseData');
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        // รองรับหลายรูปแบบ response จาก Backend
-        // แบบ 1: {success, data: {user, token}}
-        // แบบ 2: {success, user, token}
-        // แบบ 3: {success, user} (ไม่มี token)
-        
-        final data = response.data['data'];
-        final user = data?['user'] ?? response.data['user'];
-        final token = data?['token'] ?? response.data['token'];
-        final refreshToken = data?['refresh_token'] ?? response.data['refresh_token'];
-
+      if (responseData != null && responseData['success'] == true) {
+        // API ส่งมาใน format: { success, message, data: {...}, token }
         return {
           'success': true,
-          'user': user,
-          'token': token,
-          'refresh_token': refreshToken,
-          'message': response.data['message'] ?? 'เข้าสู่ระบบสำเร็จ',
+          'user': responseData['data'],  // ส่ง data กลับเป็น user
+          'data': responseData['data'],  // ส่ง data กลับด้วย
+          'token': responseData['token'] ?? responseData['data']?['token'],
+          'refresh_token': responseData['refresh_token'],
+          'message': responseData['message'] ?? 'เข้าสู่ระบบสำเร็จ',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData?['message'] ?? 'เข้าสู่ระบบไม่สำเร็จ',
         };
       }
-      
-      return {
-        'success': false,
-        'message': response.data['message'] ?? 'เข้าสู่ระบบไม่สำเร็จ',
-      };
     } catch (e) {
       debugPrint('🔴 Login Repository Error: $e');
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  // ============================================
-  // Login - Sunmi Device
-  // ============================================
-  
-  Future<Map<String, dynamic>> loginSunmi({
-    required String username,
-    required String password,
-    required String deviceUuid,
-  }) async {
-    try {
-      final response = await _apiService.post(
-        ApiConfig.sunmiLogin,
-        data: {
-          'username': username,
-          'password': password,
-          'device_uuid': deviceUuid,
-        },
-      );
-
-      debugPrint('🟡 Raw Sunmi API Response: ${response.data}');
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final data = response.data['data'];
-        final user = data?['user'] ?? response.data['user'];
-        final token = data?['token'] ?? response.data['token'];
-        final village = data?['village'] ?? response.data['village'];
-
-        return {
-          'success': true,
-          'user': user,
-          'token': token,
-          'village': village,
-          'message': response.data['message'] ?? 'เข้าสู่ระบบสำเร็จ',
-        };
-      }
-      
       return {
         'success': false,
-        'message': response.data['message'] ?? 'เข้าสู่ระบบไม่สำเร็จ',
+        'message': e.toString(),
       };
-    } catch (e) {
-      debugPrint('🔴 LoginSunmi Repository Error: $e');
-      return {'success': false, 'message': e.toString()};
     }
   }
 
-  // ============================================
-  // Logout
-  // ============================================
-  
-  Future<void> logout() async {
-    await _apiService.logout();
-  }
-
-  // ============================================
-  // User Profile
-  // ============================================
-  
-  Future<Map<String, dynamic>?> getCurrentUser() async {
+  /// Logout
+  Future<bool> logout() async {
     try {
-      final response = await _apiService.get('${ApiConfig.auth}/me.php');
-      
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return response.data['data'];
-      }
-      return null;
+      return true;
     } catch (e) {
-      debugPrint('Get current user error: $e');
-      return null;
+      debugPrint('Logout error: $e');
+      return false;
     }
   }
 
-  Future<Map<String, dynamic>> updateProfile({
-    required Map<String, dynamic> profileData,
-  }) async {
+  /// Refresh Token
+  Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     try {
       final response = await _apiService.post(
-        '${ApiConfig.auth}/update-profile.php',
-        data: profileData,
+        '/auth/refresh.php',
+        data: {'refresh_token': refreshToken},
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
+      final responseData = response.data;
+
+      if (responseData != null && responseData['success'] == true) {
         return {
           'success': true,
-          'data': response.data['data'],
-          'message': response.data['message'] ?? 'อัปเดตโปรไฟล์สำเร็จ',
+          'token': responseData['token'],
+          'refresh_token': responseData['refresh_token'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData?['message'] ?? 'ไม่สามารถต่ออายุ Token ได้',
         };
       }
-      
+    } catch (e) {
       return {
         'success': false,
-        'message': response.data['message'] ?? 'อัปเดตโปรไฟล์ไม่สำเร็จ',
+        'message': e.toString(),
       };
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
     }
   }
 
+  /// Change Password
   Future<Map<String, dynamic>> changePassword({
-    required String currentPassword,
+    required String oldPassword,
     required String newPassword,
   }) async {
     try {
       final response = await _apiService.post(
-        '${ApiConfig.auth}/change-password.php',
+        '/auth/change-password.php',
         data: {
-          'current_password': currentPassword,
+          'old_password': oldPassword,
           'new_password': newPassword,
         },
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
+      final responseData = response.data;
+
+      if (responseData != null && responseData['success'] == true) {
         return {
           'success': true,
-          'message': response.data['message'] ?? 'เปลี่ยนรหัสผ่านสำเร็จ',
+          'message': responseData['message'] ?? 'เปลี่ยนรหัสผ่านสำเร็จ',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData?['message'] ?? 'เปลี่ยนรหัสผ่านไม่สำเร็จ',
         };
       }
-      
+    } catch (e) {
       return {
         'success': false,
-        'message': response.data['message'] ?? 'เปลี่ยนรหัสผ่านไม่สำเร็จ',
+        'message': e.toString(),
       };
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
     }
   }
 
-  // ============================================
-  // Connection Test
-  // ============================================
-  
-  Future<Map<String, dynamic>> testConnection() async {
-    return await _apiService.testConnection();
+  /// Get User Profile
+  Future<Map<String, dynamic>> getProfile() async {
+    try {
+      final response = await _apiService.get('/auth/profile.php');
+
+      final responseData = response.data;
+
+      if (responseData != null && responseData['success'] == true) {
+        return {
+          'success': true,
+          'data': responseData['data'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData?['message'] ?? 'ไม่สามารถดึงข้อมูลผู้ใช้ได้',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': e.toString(),
+      };
+    }
   }
 }
