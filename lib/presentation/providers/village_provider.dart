@@ -1,88 +1,144 @@
 import 'package:flutter/foundation.dart';
+import '../../data/services/api_service.dart';
+import '../../data/repositories/village_repository.dart';
 
 class VillageProvider with ChangeNotifier {
   List<Map<String, dynamic>> _villages = [];
   bool _isLoading = false;
+  String? _errorMessage;
 
   List<Map<String, dynamic>> get villages => _villages;
   bool get isLoading => _isLoading;
+  String? get errorMessage => _errorMessage;
 
-  /// Load villages from database/API
+  // API Service & Repository
+  late ApiService _apiService;
+  late VillageRepository _villageRepository;
+
+  VillageProvider() {
+    _apiService = ApiService();
+    _villageRepository = VillageRepository(_apiService);
+  }
+
+  /// Load villages from API
   Future<void> loadVillages() async {
     _isLoading = true;
+    _errorMessage = null;
     notifyListeners();
 
     try {
-      // Simulate API call - replace with actual database query
-      await Future.delayed(const Duration(seconds: 1));
+      debugPrint('🔵 VillageProvider.loadVillages() เริ่มทำงาน...');
       
-      // Mock data - replace with actual data from database
-      _villages = [
-        {
-          'id': 1,
-          'village_code': 'VL001',
-          'village_name': 'หมู่บ้านสวนสยาม 1',
-          'address': '123 ถ.พหลโยธิน',
-          'province': 'กรุงเทพมหานคร',
-          'district': 'จตุจักร',
-          'sub_district': 'ลาดยาว',
-          'contact_phone': '02-1234567',
-          'total_houses': 150,
-        },
-        {
-          'id': 2,
-          'village_code': 'VL002',
-          'village_name': 'หมู่บ้านมัณฑนา',
-          'address': '456 ถ.รามอินทรา',
-          'province': 'กรุงเทพมหานคร',
-          'district': 'คันนายาว',
-          'sub_district': 'คันนายาว',
-          'contact_phone': '02-7654321',
-          'total_houses': 200,
-        },
-        {
-          'id': 3,
-          'village_code': 'VL003',
-          'village_name': 'หมู่บ้านเมืองทอง',
-          'address': '789 ถ.แจ้งวัฒนะ',
-          'province': 'นนทบุรี',
-          'district': 'ปากเกร็ด',
-          'sub_district': 'บางตลาด',
-          'contact_phone': '02-9876543',
-          'total_houses': 180,
-        },
-      ];
+      // ============================================
+      // โหลดจาก API จริง
+      // ============================================
+      final villages = await _villageRepository.getAllVillages();
+      
+      debugPrint('🟢 โหลดหมู่บ้านจาก API: ${villages.length} รายการ');
+      
+      if (villages.isNotEmpty) {
+        _villages = villages;
+      } else {
+        // ============================================
+        // ถ้า API ไม่มีข้อมูล ใช้ Mock Data
+        // (สำหรับ Development/Testing)
+        // ============================================
+        debugPrint('🟡 API ไม่มีข้อมูล - ใช้ Mock Data');
+        _villages = _getMockVillages();
+      }
       
       _isLoading = false;
       notifyListeners();
-    } catch (e) {
+      
+      debugPrint('🟢 Villages loaded: ${_villages.length}');
+      for (var v in _villages) {
+        debugPrint('   - ${v['village_name'] ?? v['name']} (ID: ${v['id'] ?? v['village_id']})');
+      }
+      
+    } catch (e, stackTrace) {
+      debugPrint('🔴 Load villages error: $e');
+      debugPrint('🔴 Stack trace: $stackTrace');
+      
+      // ถ้าเกิด error ใช้ Mock Data
+      _villages = _getMockVillages();
+      _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
-      debugPrint('Load villages error: $e');
     }
+  }
+
+  /// Mock data สำหรับ Development
+  List<Map<String, dynamic>> _getMockVillages() {
+    return [
+      {
+        'id': 1,
+        'village_id': 1,
+        'village_code': 'VL001',
+        'village_name': 'หมู่บ้านสวนสยาม',
+        'name': 'หมู่บ้านสวนสยาม',
+        'address': '123 ถ.เสรีไทย',
+        'province': 'กรุงเทพมหานคร',
+        'district': 'คันนายาว',
+        'sub_district': 'คันนายาว',
+        'contact_phone': '02-123-4567',
+        'total_houses': 150,
+        'is_active': true,
+        'status': 'active',
+      },
+      {
+        'id': 2,
+        'village_id': 2,
+        'village_code': 'VL002',
+        'village_name': 'หมู่บ้านเมืองทอง',
+        'name': 'หมู่บ้านเมืองทอง',
+        'address': '456 ถ.แจ้งวัฒนะ',
+        'province': 'นนทบุรี',
+        'district': 'ปากเกร็ด',
+        'sub_district': 'บางตลาด',
+        'contact_phone': '02-234-5678',
+        'total_houses': 200,
+        'is_active': true,
+        'status': 'active',
+      },
+      {
+        'id': 3,
+        'village_id': 3,
+        'village_code': 'VL003',
+        'village_name': 'หมู่บ้านพฤกษา',
+        'name': 'หมู่บ้านพฤกษา',
+        'address': '789 ถ.รังสิต-นครนายก',
+        'province': 'ปทุมธานี',
+        'district': 'ธัญบุรี',
+        'sub_district': 'ประชาธิปัตย์',
+        'contact_phone': '02-345-6789',
+        'total_houses': 180,
+        'is_active': true,
+        'status': 'active',
+      },
+    ];
   }
 
   /// Add new village
   Future<bool> addVillage(Map<String, dynamic> villageData) async {
     try {
-      // Generate new ID
-      final newId = _villages.isEmpty 
-          ? 1 
-          : (_villages.map((v) => v['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+      debugPrint('🔵 addVillage() เริ่มทำงาน...');
       
-      final newVillage = {
-        'id': newId,
-        ...villageData,
-      };
+      final result = await _villageRepository.createVillage(villageData);
       
-      // Simulate API call
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      _villages.add(newVillage);
-      notifyListeners();
-      return true;
+      if (result['success'] == true) {
+        debugPrint('🟢 เพิ่มหมู่บ้านสำเร็จ');
+        await loadVillages(); // Reload data
+        return true;
+      } else {
+        debugPrint('🔴 เพิ่มหมู่บ้านไม่สำเร็จ: ${result['message']}');
+        _errorMessage = result['message'];
+        notifyListeners();
+        return false;
+      }
     } catch (e) {
-      debugPrint('Add village error: $e');
+      debugPrint('🔴 Add village error: $e');
+      _errorMessage = e.toString();
+      notifyListeners();
       return false;
     }
   }
@@ -90,21 +146,24 @@ class VillageProvider with ChangeNotifier {
   /// Update existing village
   Future<bool> updateVillage(int id, Map<String, dynamic> villageData) async {
     try {
-      final index = _villages.indexWhere((v) => v['id'] == id);
-      if (index == -1) return false;
+      debugPrint('🔵 updateVillage($id) เริ่มทำงาน...');
       
-      // Simulate API call
-      await Future.delayed(const Duration(milliseconds: 500));
+      final result = await _villageRepository.updateVillage(id, villageData);
       
-      _villages[index] = {
-        'id': id,
-        ...villageData,
-      };
-      
-      notifyListeners();
-      return true;
+      if (result['success'] == true) {
+        debugPrint('🟢 แก้ไขหมู่บ้านสำเร็จ');
+        await loadVillages(); // Reload data
+        return true;
+      } else {
+        debugPrint('🔴 แก้ไขหมู่บ้านไม่สำเร็จ: ${result['message']}');
+        _errorMessage = result['message'];
+        notifyListeners();
+        return false;
+      }
     } catch (e) {
-      debugPrint('Update village error: $e');
+      debugPrint('🔴 Update village error: $e');
+      _errorMessage = e.toString();
+      notifyListeners();
       return false;
     }
   }
@@ -112,14 +171,24 @@ class VillageProvider with ChangeNotifier {
   /// Delete village
   Future<bool> deleteVillage(int id) async {
     try {
-      // Simulate API call
-      await Future.delayed(const Duration(milliseconds: 500));
+      debugPrint('🔵 deleteVillage($id) เริ่มทำงาน...');
       
-      _villages.removeWhere((v) => v['id'] == id);
-      notifyListeners();
-      return true;
+      final result = await _villageRepository.deleteVillage(id);
+      
+      if (result['success'] == true) {
+        debugPrint('🟢 ลบหมู่บ้านสำเร็จ');
+        await loadVillages(); // Reload data
+        return true;
+      } else {
+        debugPrint('🔴 ลบหมู่บ้านไม่สำเร็จ: ${result['message']}');
+        _errorMessage = result['message'];
+        notifyListeners();
+        return false;
+      }
     } catch (e) {
-      debugPrint('Delete village error: $e');
+      debugPrint('🔴 Delete village error: $e');
+      _errorMessage = e.toString();
+      notifyListeners();
       return false;
     }
   }
@@ -127,7 +196,9 @@ class VillageProvider with ChangeNotifier {
   /// Get village by ID
   Map<String, dynamic>? getVillageById(int id) {
     try {
-      return _villages.firstWhere((village) => village['id'] == id);
+      return _villages.firstWhere(
+        (village) => (village['id'] ?? village['village_id']) == id,
+      );
     } catch (e) {
       return null;
     }
@@ -149,11 +220,17 @@ class VillageProvider with ChangeNotifier {
     if (query.isEmpty) return _villages;
     
     return _villages.where((village) {
-      final name = village['village_name']?.toString().toLowerCase() ?? '';
-      final code = village['village_code']?.toString().toLowerCase() ?? '';
+      final name = (village['village_name'] ?? village['name'] ?? '').toString().toLowerCase();
+      final code = (village['village_code'] ?? '').toString().toLowerCase();
       final searchQuery = query.toLowerCase();
       
       return name.contains(searchQuery) || code.contains(searchQuery);
     }).toList();
+  }
+
+  /// Clear error
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
   }
 }

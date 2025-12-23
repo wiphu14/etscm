@@ -1,360 +1,252 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/configs/api_config.dart';
 
+/// API Service สำหรับเรียก REST API
 class ApiService {
   late Dio _dio;
-  String? _token;
-  String? _deviceUuid;
+  String? _authToken;
 
   ApiService() {
-    _dio = Dio(BaseOptions(
-      baseUrl: ApiConfig.baseUrl,
-      connectTimeout: ApiConfig.connectTimeout,
-      receiveTimeout: ApiConfig.receiveTimeout,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    ));
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: ApiConfig.baseUrl,
+        // แก้ไข: ใช้ Duration แทน int
+        connectTimeout: Duration(milliseconds: ApiConfig.connectTimeout),
+        receiveTimeout: Duration(milliseconds: ApiConfig.receiveTimeout),
+        sendTimeout: Duration(milliseconds: ApiConfig.sendTimeout),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        // ไม่ throw error สำหรับ 4xx และ 5xx เพื่อให้อ่าน response body ได้
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    );
 
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        if (_token != null) {
-          options.headers['Authorization'] = 'Bearer $_token';
-        }
-        if (_deviceUuid != null) {
-          options.headers['X-Device-UUID'] = _deviceUuid;
-        }
-        debugPrint('📤 Request: ${options.method} ${options.uri}');
-        debugPrint('📤 Body: ${options.data}');
-        return handler.next(options);
-      },
-      onResponse: (response, handler) {
-        debugPrint('📥 Response [${response.statusCode}]: ${response.data}');
-        return handler.next(response);
-      },
-      onError: (error, handler) async {
-        debugPrint('❌ Error [${error.response?.statusCode}]: ${error.message}');
-        
-        if (error.response?.statusCode == 401) {
-          final refreshed = await _refreshToken();
-          if (refreshed) {
-            return handler.resolve(await _retry(error.requestOptions));
+    // Add interceptors
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          // Add auth token if available
+          if (_authToken != null) {
+            options.headers['Authorization'] = 'Bearer $_authToken';
           }
-        }
-        return handler.next(error);
-      },
-    ));
-
-    _loadToken();
+          
+          debugPrint('📤 Request: ${options.method} ${options.uri}');
+          if (options.data != null) {
+            // Don't log base64 photo data
+            var logData = options.data;
+            if (logData is Map && logData['photo_base64'] != null) {
+              logData = Map.from(logData);
+              logData['photo_base64'] = '[BASE64_DATA]';
+            }
+            debugPrint('📤 Body: $logData');
+          }
+          
+          return handler.next(options);
+        },
+        onResponse: (response, handler) {
+          debugPrint('📥 Response [${response.statusCode}]: ${response.requestOptions.uri}');
+          return handler.next(response);
+        },
+        onError: (error, handler) {
+          debugPrint('❌ Error [${error.response?.statusCode}]: ${error.message}');
+          
+          // Handle 401 Unauthorized
+          if (error.response?.statusCode == 401) {
+            _handleUnauthorized();
+          }
+          
+          return handler.next(error);
+        },
+      ),
+    );
   }
 
-  // ============================================
-  // Token Management
-  // ============================================
-
-  Future<void> _loadToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    _token = prefs.getString('auth_token');
-    _deviceUuid = prefs.getString('device_uuid');
+  /// Set auth token
+  void setAuthToken(String? token) {
+    _authToken = token;
+    if (token != null) {
+      _dio.options.headers['Authorization'] = 'Bearer $token';
+    } else {
+      _dio.options.headers.remove('Authorization');
+    }
   }
 
-  Future<void> _saveToken(String token) async {
-    _token = token;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('auth_token', token);
+  /// Get auth token
+  String? get authToken => _authToken;
+
+  /// Clear auth token
+  void clearAuthToken() {
+    _authToken = null;
+    _dio.options.headers.remove('Authorization');
   }
 
-  Future<void> _saveDeviceUuid(String uuid) async {
-    _deviceUuid = uuid;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('device_uuid', uuid);
+  /// Handle unauthorized (401)
+  void _handleUnauthorized() {
+    clearAuthToken();
+    // TODO: Navigate to login screen or refresh token
   }
 
-  Future<void> _clearToken() async {
-    _token = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('auth_token');
-    await prefs.remove('refresh_token');
-  }
-
-  Future<bool> _refreshToken() async {
+  /// Refresh token
+  Future<bool> refreshToken() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final refreshToken = prefs.getString('refresh_token');
-      
-      if (refreshToken == null) return false;
-
       final response = await _dio.post(
         ApiConfig.refreshToken,
-        data: {'refresh_token': refreshToken},
+        data: {'refresh_token': _authToken},
       );
 
       if (response.statusCode == 200 && response.data['success'] == true) {
-        final newToken = response.data['data']['token'];
-        await _saveToken(newToken);
-        return true;
+        final newToken = response.data['token'] ?? response.data['data']?['token'];
+        if (newToken != null) {
+          setAuthToken(newToken);
+          return true;
+        }
       }
       return false;
     } catch (e) {
-      debugPrint('Refresh token error: $e');
+      debugPrint('🔴 Refresh token error: $e');
       return false;
     }
   }
 
-  Future<Response<dynamic>> _retry(RequestOptions requestOptions) async {
-    final options = Options(
-      method: requestOptions.method,
-      headers: {
-        ...requestOptions.headers,
-        'Authorization': 'Bearer $_token',
-      },
-    );
-    return _dio.request<dynamic>(
-      requestOptions.path,
-      data: requestOptions.data,
-      queryParameters: requestOptions.queryParameters,
-      options: options,
-    );
-  }
-
-  // ============================================
-  // HTTP Methods
-  // ============================================
-
-  Future<Response> get(String path, {Map<String, dynamic>? queryParameters}) async {
-    try {
-      return await _dio.get(path, queryParameters: queryParameters);
-    } on DioException catch (e) {
-      throw _handleError(e);
-    }
-  }
-
-  Future<Response> post(String path, {dynamic data}) async {
-    try {
-      return await _dio.post(path, data: data);
-    } on DioException catch (e) {
-      throw _handleError(e);
-    }
-  }
-
-  Future<Response> put(String path, {dynamic data}) async {
-    try {
-      return await _dio.put(path, data: data);
-    } on DioException catch (e) {
-      throw _handleError(e);
-    }
-  }
-
-  Future<Response> delete(String path, {dynamic data}) async {
-    try {
-      return await _dio.delete(path, data: data);
-    } on DioException catch (e) {
-      throw _handleError(e);
-    }
-  }
-
-  // ============================================
-  // Error Handling
-  // ============================================
-
-  Exception _handleError(DioException error) {
-    String errorMessage = 'เกิดข้อผิดพลาด';
-
-    switch (error.type) {
-      case DioExceptionType.connectionTimeout:
-      case DioExceptionType.sendTimeout:
-      case DioExceptionType.receiveTimeout:
-        errorMessage = 'การเชื่อมต่อหมดเวลา กรุณาลองใหม่';
-        break;
-      case DioExceptionType.badResponse:
-        errorMessage = _getErrorMessage(error.response);
-        break;
-      case DioExceptionType.cancel:
-        errorMessage = 'คำขอถูกยกเลิก';
-        break;
-      case DioExceptionType.connectionError:
-        errorMessage = 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้';
-        break;
-      default:
-        errorMessage = 'เกิดข้อผิดพลาดที่ไม่คาดคิด';
-    }
-
-    return Exception(errorMessage);
-  }
-
-  String _getErrorMessage(Response? response) {
-    if (response == null) return 'เกิดข้อผิดพลาด';
-
-    try {
-      if (response.data is Map) {
-        return response.data['message'] ?? 
-               response.data['error'] ?? 
-               'เกิดข้อผิดพลาด (${response.statusCode})';
-      }
-      return 'เกิดข้อผิดพลาด (${response.statusCode})';
-    } catch (e) {
-      return 'เกิดข้อผิดพลาด';
-    }
-  }
-
-  // ============================================
-  // Authentication - Sunmi Device
-  // ============================================
-
-  Future<Map<String, dynamic>> loginSunmi({
-    required String username,
-    required String password,
-    required String deviceUuid,
+  /// GET request
+  Future<Response> get(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    Options? options,
   }) async {
     try {
-      final response = await post(
-        ApiConfig.sunmiLogin,
-        data: {
-          'username': username,
-          'password': password,
-          'device_uuid': deviceUuid,
-        },
+      final response = await _dio.get(
+        path,
+        queryParameters: queryParameters,
+        options: options,
       );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final data = response.data['data'];
-        await _saveToken(data['token']);
-        await _saveDeviceUuid(deviceUuid);
-        
-        if (data['refresh_token'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('refresh_token', data['refresh_token']);
-        }
-        
-        return response.data;
-      }
-
-      throw Exception(response.data['message'] ?? 'Login failed');
+      return response;
     } on DioException catch (e) {
-      throw _handleError(e);
+      debugPrint('❌ GET Error: ${e.message}');
+      rethrow;
     }
   }
 
-  // ============================================
-  // Authentication - Web/Admin
-  // ============================================
-
-  Future<Map<String, dynamic>> login({
-    required String username,
-    required String password,
-    required String role,
-    int? villageId,
+  /// POST request
+  Future<Response> post(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
   }) async {
     try {
-      final response = await post(
-        ApiConfig.login,
-        data: {
-          'username': username,
-          'password': password,
-          'role': role,
-          if (villageId != null) 'village_id': villageId,
-        },
+      final response = await _dio.post(
+        path,
+        data: data,
+        queryParameters: queryParameters,
+        options: options,
       );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final data = response.data['data'];
-        await _saveToken(data['token']);
-        
-        if (data['refresh_token'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('refresh_token', data['refresh_token']);
-        }
-        
-        return response.data;
-      }
-
-      throw Exception(response.data['message'] ?? 'Login failed');
+      return response;
     } on DioException catch (e) {
-      throw _handleError(e);
+      debugPrint('❌ POST Error: ${e.message}');
+      rethrow;
     }
   }
 
-  Future<void> logout() async {
-    try {
-      await post(ApiConfig.logout);
-    } catch (e) {
-      debugPrint('Logout error: $e');
-    } finally {
-      await _clearToken();
-    }
-  }
-
-  // ============================================
-  // Image Upload
-  // ============================================
-
-  Future<Response> uploadImage(
-    String path,
-    File imageFile, {
-    Map<String, dynamic>? additionalData,
-    String fieldName = 'image',
+  /// PUT request
+  Future<Response> put(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
   }) async {
     try {
-      String fileName = imageFile.path.split('/').last;
-      
-      FormData formData = FormData.fromMap({
-        fieldName: await MultipartFile.fromFile(imageFile.path, filename: fileName),
-        if (additionalData != null) ...additionalData,
+      final response = await _dio.put(
+        path,
+        data: data,
+        queryParameters: queryParameters,
+        options: options,
+      );
+      return response;
+    } on DioException catch (e) {
+      debugPrint('❌ PUT Error: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// DELETE request
+  Future<Response> delete(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
+    try {
+      final response = await _dio.delete(
+        path,
+        data: data,
+        queryParameters: queryParameters,
+        options: options,
+      );
+      return response;
+    } on DioException catch (e) {
+      debugPrint('❌ DELETE Error: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// Upload file
+  Future<Response> uploadFile(
+    String path, {
+    required String filePath,
+    required String fieldName,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        ...?data,
+        fieldName: await MultipartFile.fromFile(filePath),
       });
 
-      return await _dio.post(
+      final response = await _dio.post(
         path,
         data: formData,
         options: Options(
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            if (_token != null) 'Authorization': 'Bearer $_token',
-          },
+          contentType: 'multipart/form-data',
         ),
       );
+      return response;
     } on DioException catch (e) {
-      throw _handleError(e);
+      debugPrint('❌ Upload Error: ${e.message}');
+      rethrow;
     }
   }
 
-  Future<Response> uploadImageBase64(
-    String path,
-    File imageFile, {
-    Map<String, dynamic>? additionalData,
+  /// Test connection
+  Future<bool> testConnection() async {
+    try {
+      final response = await _dio.get(ApiConfig.test);
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('❌ Connection test failed: $e');
+      return false;
+    }
+  }
+
+  /// Download file
+  Future<Response> downloadFile(
+    String url,
+    String savePath, {
+    void Function(int, int)? onReceiveProgress,
   }) async {
     try {
-      final bytes = await imageFile.readAsBytes();
-      final base64Image = base64Encode(bytes);
-      final extension = imageFile.path.split('.').last;
-
-      return await _dio.post(
-        path,
-        data: {
-          'image': base64Image,
-          'extension': extension,
-          if (additionalData != null) ...additionalData,
-        },
+      final response = await _dio.download(
+        url,
+        savePath,
+        onReceiveProgress: onReceiveProgress,
       );
+      return response;
     } on DioException catch (e) {
-      throw _handleError(e);
-    }
-  }
-
-  // ============================================
-  // Test Connection
-  // ============================================
-
-  Future<Map<String, dynamic>> testConnection() async {
-    try {
-      final response = await get(ApiConfig.test);
-      return {'success': true, 'data': response.data};
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
+      debugPrint('❌ Download Error: ${e.message}');
+      rethrow;
     }
   }
 }

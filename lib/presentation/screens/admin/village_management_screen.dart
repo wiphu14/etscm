@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../data/services/api_service.dart';
-import '../../../data/repositories/village_repository.dart';
 import '../../widgets/custom_card.dart';
+import '../../providers/village_provider.dart';
 
 class VillageManagementScreen extends StatefulWidget {
   const VillageManagementScreen({Key? key}) : super(key: key);
@@ -14,49 +14,18 @@ class VillageManagementScreen extends StatefulWidget {
 }
 
 class _VillageManagementScreenState extends State<VillageManagementScreen> {
-  List<Map<String, dynamic>> _villages = [];
-  bool _isLoading = true;
-  String? _errorMessage;
-
-  late ApiService _apiService;
-  late VillageRepository _villageRepository;
-
   @override
   void initState() {
     super.initState();
-    _apiService = ApiService();
-    _villageRepository = VillageRepository(_apiService);
-    _loadVillages();
+    // โหลดข้อมูลหลังจาก build เสร็จ
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadVillages();
+    });
   }
 
   Future<void> _loadVillages() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      debugPrint('🔵 กำลังโหลดรายการหมู่บ้าน...');
-      
-      final villages = await _villageRepository.getAllVillages();
-      
-      debugPrint('🟢 โหลดหมู่บ้านสำเร็จ: ${villages.length} รายการ');
-
-      if (mounted) {
-        setState(() {
-          _villages = List<Map<String, dynamic>>.from(villages);
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('🔴 โหลดหมู่บ้านไม่สำเร็จ: $e');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = e.toString();
-        });
-      }
-    }
+    debugPrint('🔵 VillageManagementScreen._loadVillages() เริ่มทำงาน...');
+    await context.read<VillageProvider>().loadVillages();
   }
 
   @override
@@ -78,7 +47,25 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
+      body: Consumer<VillageProvider>(
+        builder: (context, villageProvider, child) {
+          debugPrint('🟡 Consumer rebuild - isLoading: ${villageProvider.isLoading}, villages: ${villageProvider.villages.length}');
+          
+          if (villageProvider.isLoading) {
+            return _buildLoading();
+          }
+
+          if (villageProvider.errorMessage != null && villageProvider.villages.isEmpty) {
+            return _buildError(villageProvider.errorMessage!);
+          }
+
+          if (villageProvider.villages.isEmpty) {
+            return _buildEmpty();
+          }
+
+          return _buildVillageList(villageProvider.villages);
+        },
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddVillageDialog(),
         backgroundColor: AppColors.primary,
@@ -87,76 +74,85 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
     );
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16.h),
-            Text('กำลังโหลดข้อมูล...', style: AppTextStyles.bodyMedium),
-          ],
-        ),
-      );
-    }
+  Widget _buildLoading() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: AppColors.primary),
+          SizedBox(height: 16.h),
+          Text('กำลังโหลดข้อมูล...', style: AppTextStyles.bodyMedium),
+        ],
+      ),
+    );
+  }
 
-    if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline_rounded, size: 64.sp, color: AppColors.error),
-            SizedBox(height: 16.h),
-            Text('เกิดข้อผิดพลาด', style: AppTextStyles.h4),
-            SizedBox(height: 8.h),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32.w),
-              child: Text(
-                _errorMessage!,
-                style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            SizedBox(height: 16.h),
-            ElevatedButton.icon(
-              onPressed: _loadVillages,
-              icon: Icon(Icons.refresh_rounded),
-              label: Text('ลองใหม่'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_villages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.home_work_outlined, size: 64.sp, color: AppColors.textSecondary),
-            SizedBox(height: 16.h),
-            Text('ไม่พบข้อมูลหมู่บ้าน', style: AppTextStyles.h4),
-            SizedBox(height: 8.h),
-            Text(
-              'กดปุ่ม + เพื่อเพิ่มหมู่บ้านใหม่',
+  Widget _buildError(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline_rounded, size: 64.sp, color: AppColors.error),
+          SizedBox(height: 16.h),
+          Text('เกิดข้อผิดพลาด', style: AppTextStyles.h4),
+          SizedBox(height: 8.h),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32.w),
+            child: Text(
+              message,
               style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
             ),
-          ],
-        ),
-      );
-    }
+          ),
+          SizedBox(height: 16.h),
+          ElevatedButton.icon(
+            onPressed: _loadVillages,
+            icon: Icon(Icons.refresh_rounded),
+            label: Text('ลองใหม่'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
+  Widget _buildEmpty() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.home_work_outlined, size: 64.sp, color: AppColors.textSecondary),
+          SizedBox(height: 16.h),
+          Text('ไม่พบข้อมูลหมู่บ้าน', style: AppTextStyles.h4),
+          SizedBox(height: 8.h),
+          Text(
+            'กดปุ่ม + เพื่อเพิ่มหมู่บ้านใหม่',
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+          ),
+          SizedBox(height: 16.h),
+          ElevatedButton.icon(
+            onPressed: _loadVillages,
+            icon: Icon(Icons.refresh_rounded),
+            label: Text('รีเฟรช'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVillageList(List<Map<String, dynamic>> villages) {
     return RefreshIndicator(
       onRefresh: _loadVillages,
       child: ListView.builder(
         padding: EdgeInsets.all(16.w),
-        itemCount: _villages.length,
+        itemCount: villages.length,
         itemBuilder: (context, index) {
-          final village = _villages[index];
+          final village = villages[index];
           return _buildVillageCard(village);
         },
       ),
@@ -164,7 +160,16 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
   }
 
   Widget _buildVillageCard(Map<String, dynamic> village) {
-    final isActive = village['is_active'] == true || village['status'] == 'active';
+    final isActive = village['is_active'] == true || 
+                     village['is_active'] == 1 ||
+                     village['status'] == 'active';
+    
+    final villageName = village['village_name'] ?? village['name'] ?? 'ไม่ระบุ';
+    final villageCode = village['village_code'] ?? '-';
+    final address = village['address'] ?? '-';
+    final phone = village['contact_phone'] ?? village['phone'] ?? '-';
+    final totalHouses = village['total_houses'] ?? 0;
+    final villageId = village['id'] ?? village['village_id'];
     
     return CustomCard(
       margin: EdgeInsets.only(bottom: 12.h),
@@ -193,14 +198,14 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      village['village_name'] ?? village['name'] ?? 'ไม่ระบุ',
+                      villageName,
                       style: AppTextStyles.bodyMedium.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     SizedBox(height: 4.h),
                     Text(
-                      'รหัส: ${village['village_code'] ?? '-'}',
+                      'รหัส: $villageCode',
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -233,7 +238,7 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
                 child: _buildInfoItem(
                   icon: Icons.location_on_outlined,
                   label: 'ที่อยู่',
-                  value: village['address'] ?? '-',
+                  value: address,
                 ),
               ),
             ],
@@ -245,14 +250,14 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
                 child: _buildInfoItem(
                   icon: Icons.phone_outlined,
                   label: 'โทรศัพท์',
-                  value: village['contact_phone'] ?? '-',
+                  value: phone,
                 ),
               ),
               Expanded(
                 child: _buildInfoItem(
                   icon: Icons.home_outlined,
                   label: 'จำนวนบ้าน',
-                  value: '${village['total_houses'] ?? 0} หลัง',
+                  value: '$totalHouses หลัง',
                 ),
               ),
             ],
@@ -321,12 +326,12 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
     final nameController = TextEditingController(text: village?['village_name'] ?? village?['name'] ?? '');
     final codeController = TextEditingController(text: village?['village_code'] ?? '');
     final addressController = TextEditingController(text: village?['address'] ?? '');
-    final phoneController = TextEditingController(text: village?['contact_phone'] ?? '');
+    final phoneController = TextEditingController(text: village?['contact_phone'] ?? village?['phone'] ?? '');
     final housesController = TextEditingController(text: '${village?['total_houses'] ?? ''}');
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
         title: Text(isEdit ? 'แก้ไขหมู่บ้าน' : 'เพิ่มหมู่บ้านใหม่', style: AppTextStyles.h4),
         content: SingleChildScrollView(
@@ -380,20 +385,41 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('ยกเลิก'),
           ),
           ElevatedButton(
-            onPressed: () {
-              // TODO: Implement save to API
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(isEdit ? 'แก้ไขข้อมูลสำเร็จ' : 'เพิ่มหมู่บ้านสำเร็จ'),
-                  backgroundColor: AppColors.success,
-                ),
-              );
-              _loadVillages();
+            onPressed: () async {
+              final villageData = {
+                'village_name': nameController.text,
+                'village_code': codeController.text,
+                'address': addressController.text,
+                'contact_phone': phoneController.text,
+                'total_houses': int.tryParse(housesController.text) ?? 0,
+              };
+
+              Navigator.pop(dialogContext);
+
+              final villageProvider = context.read<VillageProvider>();
+              bool success;
+
+              if (isEdit) {
+                final id = village['id'] ?? village['village_id'];
+                success = await villageProvider.updateVillage(id, villageData);
+              } else {
+                success = await villageProvider.addVillage(villageData);
+              }
+
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(success 
+                      ? (isEdit ? 'แก้ไขข้อมูลสำเร็จ' : 'เพิ่มหมู่บ้านสำเร็จ')
+                      : (villageProvider.errorMessage ?? 'เกิดข้อผิดพลาด')),
+                    backgroundColor: success ? AppColors.success : AppColors.error,
+                  ),
+                );
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
             child: Text(isEdit ? 'บันทึก' : 'เพิ่ม'),
@@ -404,31 +430,40 @@ class _VillageManagementScreenState extends State<VillageManagementScreen> {
   }
 
   void _showDeleteConfirmDialog(Map<String, dynamic> village) {
+    final villageName = village['village_name'] ?? village['name'] ?? 'ไม่ระบุ';
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
         title: Text('ยืนยันการลบ', style: AppTextStyles.h4),
         content: Text(
-          'คุณต้องการลบหมู่บ้าน "${village['village_name'] ?? village['name']}" ใช่หรือไม่?',
+          'คุณต้องการลบหมู่บ้าน "$villageName" ใช่หรือไม่?',
           style: AppTextStyles.bodyMedium,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('ยกเลิก'),
           ),
           ElevatedButton(
-            onPressed: () {
-              // TODO: Implement delete API
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('ลบหมู่บ้านสำเร็จ'),
-                  backgroundColor: AppColors.success,
-                ),
-              );
-              _loadVillages();
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              
+              final villageProvider = context.read<VillageProvider>();
+              final id = village['id'] ?? village['village_id'];
+              final success = await villageProvider.deleteVillage(id);
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(success 
+                      ? 'ลบหมู่บ้านสำเร็จ'
+                      : (villageProvider.errorMessage ?? 'เกิดข้อผิดพลาด')),
+                    backgroundColor: success ? AppColors.success : AppColors.error,
+                  ),
+                );
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
             child: Text('ลบ'),

@@ -1,335 +1,343 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import '../services/api_service.dart';
 import '../../core/configs/api_config.dart';
 
+/// Repository สำหรับจัดการ Visitors
 class VisitorRepository {
   final ApiService _apiService;
 
   VisitorRepository(this._apiService);
 
-  // ============================================
-  // Query Operations
-  // ============================================
-
+  /// ดึงรายการ Visitors ทั้งหมด
   Future<List<Map<String, dynamic>>> getAllVisitors({
     int? villageId,
-    int? page,
-    int? limit,
+    String? keyword,
+    int page = 1,
+    int limit = 20,
   }) async {
     try {
+      final queryParams = <String, dynamic>{'page': page, 'limit': limit};
+      if (villageId != null) queryParams['village_id'] = villageId;
+      if (keyword != null && keyword.isNotEmpty) queryParams['keyword'] = keyword;
+
       final response = await _apiService.get(
         ApiConfig.getAllVisitors,
-        queryParameters: {
-          if (villageId != null) 'village_id': villageId,
-          if (page != null) 'page': page,
-          if (limit != null) 'limit': limit,
-        },
+        queryParameters: queryParams,
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final List data = response.data['data'] ?? [];
-        return data.map((e) => e as Map<String, dynamic>).toList();
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is List) {
+          return data.map((e) => e as Map<String, dynamic>).toList();
+        }
+        if (data is Map && data['data'] is List) {
+          return (data['data'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
       }
       return [];
     } catch (e) {
-      debugPrint('Get visitors error: $e');
+      debugPrint('🔴 getAllVisitors Error: $e');
       return [];
     }
   }
 
-  Future<List<Map<String, dynamic>>> searchVisitor({
-    String? keyword,
-    String? phone,
-    String? licensePlate,
-    String? visitorCode,
-    int? villageId,
-  }) async {
-    try {
-      final response = await _apiService.get(
-        ApiConfig.searchVisitor,
-        queryParameters: {
-          if (keyword != null && keyword.isNotEmpty) 'keyword': keyword,
-          if (phone != null && phone.isNotEmpty) 'phone': phone,
-          if (licensePlate != null && licensePlate.isNotEmpty) 'license_plate': licensePlate,
-          if (visitorCode != null && visitorCode.isNotEmpty) 'visitor_code': visitorCode,
-          if (villageId != null) 'village_id': villageId,
-        },
-      );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final List data = response.data['data'] ?? [];
-        return data.map((e) => e as Map<String, dynamic>).toList();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Search visitor error: $e');
-      return [];
-    }
-  }
-
-  Future<Map<String, dynamic>?> getVisitorById(int id) async {
+  /// ดึง Visitor ตาม ID
+  Future<Map<String, dynamic>?> getVisitorById(int visitorId) async {
     try {
       final response = await _apiService.get(
         ApiConfig.getVisitorById,
-        queryParameters: {'id': id},
+        queryParameters: {'id': visitorId},
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return response.data['data'] as Map<String, dynamic>;
-      }
-      return null;
-    } catch (e) {
-      debugPrint('Get visitor by ID error: $e');
-      return null;
-    }
-  }
-
-  Future<Map<String, dynamic>?> getVisitorByQRCode(String qrCode) async {
-    try {
-      final response = await _apiService.get(
-        ApiConfig.searchVisitor,
-        queryParameters: {'visitor_code': qrCode},
-      );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final List data = response.data['data'] ?? [];
-        if (data.isNotEmpty) {
-          return data.first as Map<String, dynamic>;
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          if (data['success'] == true && data['data'] != null) {
+            return data['data'] as Map<String, dynamic>;
+          }
+          if (data['visitor_id'] != null) {
+            return data as Map<String, dynamic>;
+          }
         }
       }
       return null;
     } catch (e) {
-      debugPrint('Get visitor by QR code error: $e');
+      debugPrint('🔴 getVisitorById Error: $e');
       return null;
     }
   }
 
-  // ============================================
-  // CRUD Operations
-  // ============================================
+  /// ค้นหา Visitor
+  Future<List<Map<String, dynamic>>> searchVisitor({
+    String? keyword,
+    String? idCard,
+    String? licensePlate,
+    int? villageId,
+  }) async {
+    try {
+      final queryParams = <String, dynamic>{};
+      if (keyword != null && keyword.isNotEmpty) queryParams['keyword'] = keyword;
+      if (idCard != null && idCard.isNotEmpty) queryParams['id_card'] = idCard;
+      if (licensePlate != null && licensePlate.isNotEmpty) queryParams['license_plate'] = licensePlate;
+      if (villageId != null) queryParams['village_id'] = villageId;
 
-  Future<Map<String, dynamic>> addVisitor(Map<String, dynamic> visitorData) async {
+      final response = await _apiService.get(
+        ApiConfig.searchVisitor,
+        queryParameters: queryParams,
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is List) {
+          return data.map((e) => e as Map<String, dynamic>).toList();
+        }
+        if (data is Map && data['data'] is List) {
+          return (data['data'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return [];
+    } catch (e) {
+      debugPrint('🔴 searchVisitor Error: $e');
+      return [];
+    }
+  }
+
+  /// สร้าง Visitor ใหม่
+  Future<Map<String, dynamic>> createVisitor({
+    required int villageId,
+    required String fullName,
+    required String idCard,
+    String? phone,
+    String? vehicleType,
+    String? licensePlate,
+  }) async {
     try {
       final response = await _apiService.post(
         ApiConfig.createVisitor,
-        data: visitorData,
-      );
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        if (response.data['success'] == true) {
-          return {
-            'success': true,
-            'data': response.data['data'],
-            'message': response.data['message'] ?? 'เพิ่มผู้มาติดต่อสำเร็จ',
-          };
-        }
-      }
-
-      return {
-        'success': false,
-        'message': response.data['message'] ?? 'เพิ่มผู้มาติดต่อไม่สำเร็จ',
-      };
-    } catch (e) {
-      debugPrint('Add visitor error: $e');
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> updateVisitor(
-    int id,
-    Map<String, dynamic> visitorData,
-  ) async {
-    try {
-      final response = await _apiService.post(
-        ApiConfig.updateVisitor,
-        data: {'id': id, ...visitorData},
-      );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return {
-          'success': true,
-          'data': response.data['data'],
-          'message': response.data['message'] ?? 'อัปเดตข้อมูลสำเร็จ',
-        };
-      }
-
-      return {
-        'success': false,
-        'message': response.data['message'] ?? 'อัปเดตข้อมูลไม่สำเร็จ',
-      };
-    } catch (e) {
-      debugPrint('Update visitor error: $e');
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> deleteVisitor(int id) async {
-    try {
-      final response = await _apiService.post(
-        ApiConfig.updateVisitor,
-        data: {'id': id, 'delete': true},
-      );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return {
-          'success': true,
-          'message': response.data['message'] ?? 'ลบข้อมูลสำเร็จ',
-        };
-      }
-
-      return {
-        'success': false,
-        'message': response.data['message'] ?? 'ลบข้อมูลไม่สำเร็จ',
-      };
-    } catch (e) {
-      debugPrint('Delete visitor error: $e');
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  // ============================================
-  // Photo Operations
-  // ============================================
-
-  Future<Map<String, dynamic>> uploadPhoto({
-    required File photoFile,
-    required String visitorCode,
-    int photoIndex = 1,
-    bool useBase64 = false,
-  }) async {
-    try {
-      dynamic response;
-      
-      if (useBase64) {
-        response = await _apiService.uploadImageBase64(
-          ApiConfig.uploadVisitorPhoto,
-          photoFile,
-          additionalData: {
-            'visitor_code': visitorCode,
-            'photo_index': photoIndex,
-          },
-        );
-      } else {
-        response = await _apiService.uploadImage(
-          ApiConfig.uploadVisitorPhoto,
-          photoFile,
-          additionalData: {
-            'visitor_code': visitorCode,
-            'photo_index': photoIndex,
-          },
-        );
-      }
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        if (response.data['success'] == true) {
-          return {
-            'success': true,
-            'photo_url': response.data['data']?['photo_url'] ?? response.data['photo_url'],
-            'message': response.data['message'] ?? 'อัปโหลดรูปภาพสำเร็จ',
-          };
-        }
-      }
-
-      return {
-        'success': false,
-        'message': response.data['message'] ?? 'อัปโหลดรูปภาพไม่สำเร็จ',
-      };
-    } catch (e) {
-      debugPrint('Upload photo error: $e');
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> uploadMultiplePhotos({
-    required List<File> photoFiles,
-    required String visitorCode,
-  }) async {
-    try {
-      List<String> uploadedUrls = [];
-      List<String> errors = [];
-      
-      for (int i = 0; i < photoFiles.length && i < 3; i++) {
-        final result = await uploadPhoto(
-          photoFile: photoFiles[i],
-          visitorCode: visitorCode,
-          photoIndex: i + 1,
-        );
-        
-        if (result['success']) {
-          uploadedUrls.add(result['photo_url'] ?? '');
-        } else {
-          errors.add('รูปที่ ${i + 1}: ${result['message']}');
-        }
-      }
-      
-      return {
-        'success': errors.isEmpty,
-        'uploaded_urls': uploadedUrls,
-        'uploaded_count': uploadedUrls.length,
-        'errors': errors,
-        'message': errors.isEmpty 
-            ? 'อัปโหลดรูปภาพทั้งหมดสำเร็จ' 
-            : 'อัปโหลดบางรูปไม่สำเร็จ',
-      };
-    } catch (e) {
-      debugPrint('Upload multiple photos error: $e');
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  // ============================================
-  // Statistics
-  // ============================================
-
-  Future<Map<String, dynamic>> getVisitorStats({
-    int? villageId,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
-    try {
-      final response = await _apiService.get(
-        ApiConfig.getVisitorStats,
-        queryParameters: {
-          if (villageId != null) 'village_id': villageId,
-          if (startDate != null) 'start_date': startDate.toIso8601String().split('T')[0],
-          if (endDate != null) 'end_date': endDate.toIso8601String().split('T')[0],
+        data: {
+          'village_id': villageId,
+          'full_name': fullName,
+          'id_card': idCard,
+          'phone': phone ?? '',
+          'vehicle_type': vehicleType ?? 'รถยนต์',
+          'license_plate': licensePlate ?? '',
         },
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return response.data['data'] ?? {};
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = response.data;
+        if (data is Map && data['success'] == true) {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'สร้างผู้เข้าสำเร็จ',
+            'data': data['data'],
+          };
+        }
+      }
+      return {
+        'success': false,
+        'message': response.data?['message'] ?? 'สร้างผู้เข้าไม่สำเร็จ',
+      };
+    } catch (e) {
+      debugPrint('🔴 createVisitor Error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// อัปเดต Visitor
+  Future<Map<String, dynamic>> updateVisitor({
+    required int visitorId,
+    String? fullName,
+    String? phone,
+    String? vehicleType,
+    String? licensePlate,
+  }) async {
+    try {
+      final data = <String, dynamic>{'visitor_id': visitorId};
+      if (fullName != null) data['full_name'] = fullName;
+      if (phone != null) data['phone'] = phone;
+      if (vehicleType != null) data['vehicle_type'] = vehicleType;
+      if (licensePlate != null) data['license_plate'] = licensePlate;
+
+      final response = await _apiService.post(
+        ApiConfig.updateVisitor,
+        data: data,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        if (responseData is Map && responseData['success'] == true) {
+          return {
+            'success': true,
+            'message': responseData['message'] ?? 'อัปเดตผู้เข้าสำเร็จ',
+          };
+        }
+      }
+      return {
+        'success': false,
+        'message': response.data?['message'] ?? 'อัปเดตผู้เข้าไม่สำเร็จ',
+      };
+    } catch (e) {
+      debugPrint('🔴 updateVisitor Error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// อัปโหลดรูปภาพ Visitor
+  Future<Map<String, dynamic>> uploadVisitorPhoto({
+    required int visitorId,
+    required File photoFile,
+  }) async {
+    try {
+      final fileName = photoFile.path.split('/').last;
+      final formData = FormData.fromMap({
+        'visitor_id': visitorId,
+        'photo': await MultipartFile.fromFile(photoFile.path, filename: fileName),
+      });
+
+      final response = await _apiService.post(
+        ApiConfig.uploadVisitorPhoto,
+        data: formData,
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map && data['success'] == true) {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'อัปโหลดรูปภาพสำเร็จ',
+            'photo_path': data['photo_path'] ?? data['data']?['photo_path'],
+          };
+        }
+      }
+      return {
+        'success': false,
+        'message': response.data?['message'] ?? 'อัปโหลดรูปภาพไม่สำเร็จ',
+      };
+    } catch (e) {
+      debugPrint('🔴 uploadVisitorPhoto Error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// อัปโหลดรูปภาพ Visitor (base64)
+  Future<Map<String, dynamic>> uploadVisitorPhotoBase64({
+    required int visitorId,
+    required String base64Photo,
+  }) async {
+    try {
+      final response = await _apiService.post(
+        ApiConfig.uploadVisitorPhoto,
+        data: {
+          'visitor_id': visitorId,
+          'photo_base64': base64Photo,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map && data['success'] == true) {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'อัปโหลดรูปภาพสำเร็จ',
+            'photo_path': data['photo_path'] ?? data['data']?['photo_path'],
+          };
+        }
+      }
+      return {
+        'success': false,
+        'message': response.data?['message'] ?? 'อัปโหลดรูปภาพไม่สำเร็จ',
+      };
+    } catch (e) {
+      debugPrint('🔴 uploadVisitorPhotoBase64 Error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// ดึงสถิติ Visitor
+  Future<Map<String, dynamic>> getVisitorStats({int? villageId}) async {
+    try {
+      final queryParams = <String, dynamic>{};
+      if (villageId != null) queryParams['village_id'] = villageId;
+
+      final response = await _apiService.get(
+        ApiConfig.getVisitorStats,
+        queryParameters: queryParams,
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          if (data['success'] == true && data['data'] != null) {
+            return data['data'] as Map<String, dynamic>;
+          }
+          return data as Map<String, dynamic>;
+        }
       }
       return {};
     } catch (e) {
-      debugPrint('Get visitor stats error: $e');
+      debugPrint('🔴 getVisitorStats Error: $e');
       return {};
     }
   }
 
-  Future<List<Map<String, dynamic>>> getFrequentVisitors({
-    int? villageId,
-    int limit = 10,
+  /// ดึงประวัติการเข้าของ Visitor
+  Future<List<Map<String, dynamic>>> getVisitorHistory({
+    required int visitorId,
+    int page = 1,
+    int limit = 20,
   }) async {
     try {
       final response = await _apiService.get(
         ApiConfig.getAllVisitors,
         queryParameters: {
-          if (villageId != null) 'village_id': villageId,
-          'order_by': 'visit_count',
-          'order': 'desc',
+          'visitor_id': visitorId,
+          'history': true,
+          'page': page,
           'limit': limit,
         },
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final List data = response.data['data'] ?? [];
-        return data.map((e) => e as Map<String, dynamic>).toList();
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is List) {
+          return data.map((e) => e as Map<String, dynamic>).toList();
+        }
+        if (data is Map && data['data'] is List) {
+          return (data['data'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
       }
       return [];
     } catch (e) {
-      debugPrint('Get frequent visitors error: $e');
+      debugPrint('🔴 getVisitorHistory Error: $e');
       return [];
+    }
+  }
+
+  /// อัปโหลดรูปภาพ (alias for uploadVisitorPhoto)
+  Future<Map<String, dynamic>> uploadPhoto({
+    int? visitorId,
+    String? visitorCode,
+    File? photoFile,
+    String? photoBase64,
+    int? photoIndex,
+  }) async {
+    try {
+      // ถ้าไม่มี visitorId ให้ใช้ visitorCode แทน
+      final id = visitorId ?? 0;
+      
+      if (photoFile != null) {
+        return uploadVisitorPhoto(visitorId: id, photoFile: photoFile);
+      } else if (photoBase64 != null) {
+        return uploadVisitorPhotoBase64(visitorId: id, base64Photo: photoBase64);
+      }
+      return {'success': false, 'message': 'No photo provided'};
+    } catch (e) {
+      debugPrint('🔴 uploadPhoto Error: $e');
+      return {'success': false, 'message': e.toString()};
     }
   }
 }

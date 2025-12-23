@@ -7,19 +7,25 @@ class AuthRepository {
   AuthRepository(this._apiService);
 
   /// Login
+  /// รองรับทั้ง admin และ user login
   Future<Map<String, dynamic>> login({
     required String username,
     required String password,
-    required String role,
+    String? role,
     int? villageId,
   }) async {
     try {
+      debugPrint('🔵 AuthRepository.login() เริ่มทำงาน...');
+      debugPrint('🔵 Username: $username');
+      debugPrint('🔵 Role: ${role ?? "auto-detect"}');
+      debugPrint('🔵 Village ID: $villageId');
+      
       final response = await _apiService.post(
         '/auth/login.php',
         data: {
           'username': username,
           'password': password,
-          'role': role,
+          if (role != null) 'role': role,
           if (villageId != null) 'village_id': villageId,
         },
       );
@@ -28,28 +34,100 @@ class AuthRepository {
       final responseData = response.data;
       
       debugPrint('🟡 Raw API Response: $responseData');
+      debugPrint('🟡 Response Type: ${responseData.runtimeType}');
 
-      if (responseData != null && responseData['success'] == true) {
-        // API ส่งมาใน format: { success, message, data: {...}, token }
+      // ============================================
+      // ตรวจสอบ success จาก response
+      // รองรับหลาย format:
+      // 1. { "success": true, ... }
+      // 2. { "status": "success", ... }
+      // 3. { "code": 200, ... }
+      // ============================================
+      bool isSuccess = false;
+      
+      if (responseData is Map) {
+        isSuccess = responseData['success'] == true ||
+                    responseData['status'] == 'success' ||
+                    responseData['code'] == 200 ||
+                    responseData['code'] == '200';
+      }
+
+      if (isSuccess) {
+        debugPrint('🟢 Login API Success!');
+        
+        // ============================================
+        // แยก user data จาก response
+        // รองรับหลาย format:
+        // 1. { success, data: { user_id, ... }, token }
+        // 2. { success, user: { ... }, token }
+        // 3. { success, data: { user: {...}, token } }
+        // ============================================
+        Map<String, dynamic>? userData;
+        String? token;
+        String? refreshToken;
+        
+        if (responseData['data'] is Map) {
+          final data = responseData['data'] as Map<String, dynamic>;
+          
+          // ถ้า data มี user ข้างใน
+          if (data['user'] is Map) {
+            userData = data['user'] as Map<String, dynamic>;
+            token = data['token']?.toString() ?? responseData['token']?.toString();
+          } else {
+            // data คือ user data โดยตรง
+            userData = data;
+            token = responseData['token']?.toString() ?? data['token']?.toString();
+          }
+        } else if (responseData['user'] is Map) {
+          userData = responseData['user'] as Map<String, dynamic>;
+          token = responseData['token']?.toString();
+        }
+        
+        refreshToken = responseData['refresh_token']?.toString();
+        
+        debugPrint('🟢 Parsed User Data: $userData');
+        debugPrint('🟢 Token: ${token != null ? "มี" : "ไม่มี"}');
+        
         return {
           'success': true,
-          'user': responseData['data'],  // ส่ง data กลับเป็น user
-          'data': responseData['data'],  // ส่ง data กลับด้วย
-          'token': responseData['token'] ?? responseData['data']?['token'],
-          'refresh_token': responseData['refresh_token'],
-          'message': responseData['message'] ?? 'เข้าสู่ระบบสำเร็จ',
+          'user': userData,
+          'data': userData,
+          'token': token,
+          'refresh_token': refreshToken,
+          'message': responseData['message']?.toString() ?? 'เข้าสู่ระบบสำเร็จ',
         };
       } else {
+        // ============================================
+        // Login ไม่สำเร็จ
+        // ============================================
+        String errorMessage = 'เข้าสู่ระบบไม่สำเร็จ';
+        
+        if (responseData is Map) {
+          errorMessage = responseData['message']?.toString() ??
+                        responseData['error']?.toString() ??
+                        errorMessage;
+        }
+        
+        debugPrint('🔴 Login API Failed: $errorMessage');
+        
         return {
           'success': false,
-          'message': responseData?['message'] ?? 'เข้าสู่ระบบไม่สำเร็จ',
+          'message': errorMessage,
         };
       }
     } catch (e) {
       debugPrint('🔴 Login Repository Error: $e');
+      
+      // แปลง error message
+      String errorMessage = e.toString();
+      
+      if (errorMessage.contains('Exception:')) {
+        errorMessage = errorMessage.replaceFirst('Exception:', '').trim();
+      }
+      
       return {
         'success': false,
-        'message': e.toString(),
+        'message': errorMessage,
       };
     }
   }
@@ -57,6 +135,7 @@ class AuthRepository {
   /// Logout
   Future<bool> logout() async {
     try {
+      await _apiService.post('/auth/logout.php');
       return true;
     } catch (e) {
       debugPrint('Logout error: $e');

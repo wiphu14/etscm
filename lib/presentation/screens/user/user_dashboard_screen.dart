@@ -28,8 +28,8 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     'current_visitors': 0,
   };
 
-  // Recent entries
-  List<Map<String, dynamic>> _recentEntries = [];
+  // Recent activities (ทั้งเข้าและออก)
+  List<Map<String, dynamic>> _recentActivities = [];
   
   bool _isLoading = true;
 
@@ -54,13 +54,91 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
       debugPrint('🔵 กำลังโหลดข้อมูล Dashboard...');
       debugPrint('🔵 Village ID: ${authProvider.villageId}');
 
+      // ============================================
+      // เรียก API Dashboard ใหม่
+      // ============================================
+      final response = await _apiService.get(
+        '/sunmi/dashboard.php',
+        queryParameters: {
+          'village_id': authProvider.villageId,
+          'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        },
+      );
+
+      debugPrint('🟢 Dashboard Response: ${response.data}');
+
+      if (mounted && response.statusCode == 200) {
+        final data = response.data;
+        
+        if (data['success'] == true && data['data'] != null) {
+          final dashboardData = data['data'];
+          final stats = dashboardData['stats'] ?? {};
+          final activities = dashboardData['recent_activities'] ?? [];
+          
+          setState(() {
+            _todayStats = {
+              'total_entries': stats['today_entries'] ?? stats['total_entries'] ?? 0,
+              'total_exits': stats['today_exits'] ?? stats['total_exits'] ?? 0,
+              'current_visitors': stats['current_inside'] ?? stats['current_visitors'] ?? 0,
+            };
+            
+            _recentActivities = (activities as List).map((activity) {
+              DateTime? activityTime;
+              if (activity['activity_time'] != null) {
+                try {
+                  activityTime = DateTime.parse(activity['activity_time'].toString());
+                } catch (e) {
+                  activityTime = DateTime.now();
+                }
+              }
+              
+              return {
+                'log_id': activity['log_id'],
+                'visitor_name': activity['visitor_name'] ?? 'ไม่ระบุ',
+                'license_plate': activity['license_plate'] ?? 'ไม่ระบุ',
+                'house_number': activity['house_number'] ?? 'ไม่ระบุ',
+                'activity_time': activityTime ?? DateTime.now(),
+                'activity_type': activity['activity_type'] ?? 'entry',
+                'status': activity['status'] ?? 'inside',
+              };
+            }).toList();
+          });
+          
+          debugPrint('🟢 Stats: $_todayStats');
+          debugPrint('🟢 Activities: ${_recentActivities.length} รายการ');
+        } else {
+          // Fallback to old API
+          await _loadDashboardDataFallback();
+        }
+      } else {
+        // Fallback to old API
+        await _loadDashboardDataFallback();
+      }
+    } catch (e) {
+      debugPrint('🔴 โหลดข้อมูล Dashboard ไม่สำเร็จ: $e');
+      // Try fallback
+      await _loadDashboardDataFallback();
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  /// Fallback method ถ้า API ใหม่ยังไม่พร้อม
+  Future<void> _loadDashboardDataFallback() async {
+    try {
+      final authProvider = context.read<AuthProvider>();
+      
+      debugPrint('🟡 Using fallback API...');
+
       // โหลดสถิติ
       final stats = await _entryLogRepository.getDashboardStats(
         villageId: authProvider.villageId,
         date: DateTime.now(),
       );
       
-      debugPrint('🟢 Stats: $stats');
+      debugPrint('🟢 Stats (fallback): $stats');
 
       // โหลดรายการล่าสุด
       final logs = await _entryLogRepository.getLogsByDate(
@@ -68,7 +146,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         villageId: authProvider.villageId,
       );
       
-      debugPrint('🟢 Recent Logs: ${logs.length} รายการ');
+      debugPrint('🟢 Recent Logs (fallback): ${logs.length} รายการ');
 
       if (mounted) {
         setState(() {
@@ -78,32 +156,71 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             'current_visitors': stats['current_inside'] ?? stats['current_visitors'] ?? 0,
           };
           
-          _recentEntries = logs.take(5).map((log) {
+          // แปลง logs เป็น activities (ทั้งเข้าและออก)
+          _recentActivities = [];
+          
+          for (var log in logs.take(10)) {
             DateTime? entryTime;
+            DateTime? exitTime;
+            
             if (log['entry_time'] != null) {
               try {
                 entryTime = DateTime.parse(log['entry_time'].toString());
               } catch (e) {
-                entryTime = DateTime.now();
+                entryTime = null;
               }
             }
             
-            return {
-              'visitor_name': log['visitor_name'] ?? log['full_name'] ?? 'ไม่ระบุ',
-              'license_plate': log['license_plate'] ?? 'ไม่ระบุ',
-              'house_number': log['house_number'] ?? 'ไม่ระบุ',
-              'entry_time': entryTime ?? DateTime.now(),
-              'status': log['exit_time'] == null ? 'entry' : 'exit',
-            };
-          }).toList();
+            if (log['exit_time'] != null) {
+              try {
+                exitTime = DateTime.parse(log['exit_time'].toString());
+              } catch (e) {
+                exitTime = null;
+              }
+            }
+            
+            // เพิ่มรายการเข้า
+            if (entryTime != null) {
+              _recentActivities.add({
+                'log_id': log['log_id'],
+                'visitor_name': log['visitor_name'] ?? log['full_name'] ?? 'ไม่ระบุ',
+                'license_plate': log['license_plate'] ?? 'ไม่ระบุ',
+                'house_number': log['house_number'] ?? 'ไม่ระบุ',
+                'activity_time': entryTime,
+                'activity_type': 'entry',
+                'status': log['status'] ?? 'inside',
+              });
+            }
+            
+            // เพิ่มรายการออก (ถ้ามี)
+            if (exitTime != null) {
+              _recentActivities.add({
+                'log_id': log['log_id'],
+                'visitor_name': log['visitor_name'] ?? log['full_name'] ?? 'ไม่ระบุ',
+                'license_plate': log['license_plate'] ?? 'ไม่ระบุ',
+                'house_number': log['house_number'] ?? 'ไม่ระบุ',
+                'activity_time': exitTime,
+                'activity_type': 'exit',
+                'status': 'exited',
+              });
+            }
+          }
+          
+          // เรียงตามเวลาล่าสุด
+          _recentActivities.sort((a, b) {
+            final timeA = a['activity_time'] as DateTime;
+            final timeB = b['activity_time'] as DateTime;
+            return timeB.compareTo(timeA);
+          });
+          
+          // เอาแค่ 10 รายการล่าสุด
+          if (_recentActivities.length > 10) {
+            _recentActivities = _recentActivities.take(10).toList();
+          }
         });
       }
     } catch (e) {
-      debugPrint('🔴 โหลดข้อมูล Dashboard ไม่สำเร็จ: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      debugPrint('🔴 Fallback also failed: $e');
     }
   }
 
@@ -156,7 +273,18 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                           SizedBox(height: 24.h),
 
                           // Today Statistics
-                          Text('สถิติวันนี้', style: AppTextStyles.h4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('สถิติวันนี้', style: AppTextStyles.h4),
+                              Text(
+                                DateFormat('d MMM yyyy', 'th').format(DateTime.now()),
+                                style: AppTextStyles.caption.copyWith(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
                           SizedBox(height: 16.h),
                           _isLoading
                               ? Center(child: CircularProgressIndicator())
@@ -251,30 +379,6 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               ),
             ],
           ),
-          SizedBox(height: 16.h),
-          
-          // Date & Time
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12.r),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.calendar_today_rounded, color: Colors.white, size: 16.sp),
-                SizedBox(width: 8.w),
-                Text(
-                  DateFormat('วันEEEEที่ d MMMM yyyy', 'th').format(DateTime.now()),
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -284,31 +388,31 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     return Row(
       children: [
         Expanded(
-          child: _buildActionButton(
+          child: _buildActionCard(
+            title: 'บันทึกเข้า',
             icon: Icons.login_rounded,
-            label: 'บันทึกเข้า',
             color: AppColors.entry,
             onTap: () async {
               await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const VisitorEntryScreen()),
               );
-              _loadDashboardData(); // Refresh หลังกลับมา
+              _loadDashboardData(); // Refresh after return
             },
           ),
         ),
-        SizedBox(width: 12.w),
+        SizedBox(width: 16.w),
         Expanded(
-          child: _buildActionButton(
+          child: _buildActionCard(
+            title: 'บันทึกออก',
             icon: Icons.logout_rounded,
-            label: 'บันทึกออก',
             color: AppColors.exit,
             onTap: () async {
               await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const VisitorExitScreen()),
               );
-              _loadDashboardData(); // Refresh หลังกลับมา
+              _loadDashboardData(); // Refresh after return
             },
           ),
         ),
@@ -316,40 +420,32 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     );
   }
 
-  Widget _buildActionButton({
+  Widget _buildActionCard({
+    required String title,
     required IconData icon,
-    required String label,
     required Color color,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.symmetric(vertical: 20.h),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [color, color.withValues(alpha: 0.8)],
-          ),
-          borderRadius: BorderRadius.circular(16.r),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.3),
-              blurRadius: 8,
-              offset: Offset(0, 4),
-            ),
-          ],
-        ),
+      child: CustomCard(
+        padding: EdgeInsets.symmetric(vertical: 24.h, horizontal: 16.w),
         child: Column(
           children: [
-            Icon(icon, color: Colors.white, size: 36.sp),
-            SizedBox(height: 8.h),
+            Container(
+              width: 56.w,
+              height: 56.h,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16.r),
+              ),
+              child: Icon(icon, color: color, size: 28.sp),
+            ),
+            SizedBox(height: 12.h),
             Text(
-              label,
-              style: AppTextStyles.button.copyWith(
-                color: Colors.white,
-                fontSize: 16.sp,
+              title,
+              style: AppTextStyles.bodyMedium.copyWith(
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -437,11 +533,12 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
       children: [
         Text('กิจกรรมล่าสุด', style: AppTextStyles.h4),
         TextButton(
-          onPressed: () {
-            Navigator.push(
+          onPressed: () async {
+            await Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const VisitorHistoryScreen()),
             );
+            _loadDashboardData(); // Refresh after return
           },
           child: Row(
             children: [
@@ -461,7 +558,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   }
 
   Widget _buildRecentActivities() {
-    if (_recentEntries.isEmpty) {
+    if (_recentActivities.isEmpty) {
       return CustomCard(
         child: Center(
           child: Padding(
@@ -488,16 +585,18 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     }
 
     return Column(
-      children: _recentEntries.take(5).map((entry) {
-        return _buildActivityCard(entry);
+      children: _recentActivities.take(5).map((activity) {
+        return _buildActivityCard(activity);
       }).toList(),
     );
   }
 
-  Widget _buildActivityCard(Map<String, dynamic> entry) {
-    final isEntry = entry['status'] == 'entry';
+  Widget _buildActivityCard(Map<String, dynamic> activity) {
+    final isEntry = activity['activity_type'] == 'entry';
     final statusColor = isEntry ? AppColors.entry : AppColors.exit;
-    final timeAgo = _getTimeAgo(entry['entry_time']);
+    final activityTime = activity['activity_time'] as DateTime;
+    final timeStr = DateFormat('HH:mm').format(activityTime);
+    final timeAgo = _getTimeAgo(activityTime);
 
     return CustomCard(
       margin: EdgeInsets.only(bottom: 8.h),
@@ -523,14 +622,14 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry['visitor_name'],
+                  activity['visitor_name'] ?? 'ไม่ระบุ',
                   style: AppTextStyles.bodyMedium.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 SizedBox(height: 2.h),
                 Text(
-                  '${entry['license_plate']} • บ้าน ${entry['house_number']}',
+                  '${activity['license_plate']} • บ้าน ${activity['house_number']}',
                   style: AppTextStyles.caption,
                 ),
               ],
@@ -555,9 +654,10 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               ),
               SizedBox(height: 4.h),
               Text(
-                timeAgo,
+                timeStr,
                 style: AppTextStyles.caption.copyWith(
                   color: AppColors.textHint,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -569,7 +669,9 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
 
   String _getTimeAgo(DateTime time) {
     final difference = DateTime.now().difference(time);
-    if (difference.inMinutes < 60) {
+    if (difference.inMinutes < 1) {
+      return 'เมื่อสักครู่';
+    } else if (difference.inMinutes < 60) {
       return '${difference.inMinutes} นาทีที่แล้ว';
     } else if (difference.inHours < 24) {
       return '${difference.inHours} ชั่วโมงที่แล้ว';

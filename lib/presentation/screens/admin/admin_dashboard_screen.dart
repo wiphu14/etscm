@@ -5,9 +5,9 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/services/api_service.dart';
 import '../../../data/repositories/entry_log_repository.dart';
-import '../../../data/repositories/village_repository.dart';
 import '../../widgets/custom_card.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/village_provider.dart';
 import '../auth/login_screen.dart';
 import 'village_management_screen.dart';
 import 'user_management_screen.dart';
@@ -20,7 +20,7 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  // Statistics - จะโหลดจาก API
+  // Statistics
   int _totalVillages = 0;
   int _totalUsers = 0;
   int _totalVisitorsToday = 0;
@@ -33,15 +33,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // API Service & Repository
   late ApiService _apiService;
   late EntryLogRepository _entryLogRepository;
-  late VillageRepository _villageRepository;
 
   @override
   void initState() {
     super.initState();
     _apiService = ApiService();
     _entryLogRepository = EntryLogRepository(_apiService);
-    _villageRepository = VillageRepository(_apiService);
-    _loadDashboardData();
+    
+    // โหลดข้อมูลหลังจาก build เสร็จ
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadDashboardData();
+    });
   }
 
   Future<void> _loadDashboardData() async {
@@ -51,28 +53,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     });
 
     try {
+      debugPrint('🔵 ========================================');
       debugPrint('🔵 กำลังโหลดข้อมูล Admin Dashboard...');
+      debugPrint('🔵 ========================================');
 
-      // โหลดรายการหมู่บ้าน
-      List villages = [];
-      try {
-        villages = await _villageRepository.getAllVillages();
-        debugPrint('🟢 Villages: ${villages.length}');
-      } catch (e) {
-        debugPrint('🔴 Error loading villages: $e');
+      // ============================================
+      // 1. โหลดข้อมูลหมู่บ้านจาก VillageProvider
+      // ============================================
+      final villageProvider = context.read<VillageProvider>();
+      await villageProvider.loadVillages();
+      final villages = villageProvider.villages;
+      
+      debugPrint('🟢 Villages from Provider: ${villages.length}');
+      for (var v in villages) {
+        debugPrint('   - ${v['village_name'] ?? v['name']} (ID: ${v['id'] ?? v['village_id']})');
       }
 
-      // โหลดสถิติจาก API
+      // ============================================
+      // 2. โหลดสถิติจาก API
+      // ============================================
       Map<String, dynamic> stats = {};
       try {
         stats = await _entryLogRepository.getDashboardStats(
           date: DateTime.now(),
         );
-        debugPrint('🟢 Stats: $stats');
+        debugPrint('🟢 Stats from API: $stats');
       } catch (e) {
-        debugPrint('🔴 Error loading stats: $e');
+        debugPrint('🟡 Error loading stats: $e (ใช้ค่าเริ่มต้น)');
       }
 
+      // ============================================
+      // 3. อัปเดต State
+      // ============================================
       if (mounted) {
         setState(() {
           _totalVillages = villages.length;
@@ -84,15 +96,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         });
       }
 
+      debugPrint('🟢 ========================================');
       debugPrint('🟢 Dashboard Data Loaded:');
-      debugPrint('   - Villages: $_totalVillages');
-      debugPrint('   - Users: $_totalUsers');
-      debugPrint('   - Current Inside: $_totalVisitorsToday');
-      debugPrint('   - Entries Today: $_totalEntriesToday');
-      debugPrint('   - Exits Today: $_totalExitsToday');
+      debugPrint('🟢 - Villages: $_totalVillages');
+      debugPrint('🟢 - Users: $_totalUsers');
+      debugPrint('🟢 - Current Inside: $_totalVisitorsToday');
+      debugPrint('🟢 - Entries Today: $_totalEntriesToday');
+      debugPrint('🟢 - Exits Today: $_totalExitsToday');
+      debugPrint('🟢 ========================================');
 
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('🔴 โหลดข้อมูล Dashboard ไม่สำเร็จ: $e');
+      debugPrint('🔴 Stack trace: $stackTrace');
+      
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -105,6 +121,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
+    final villageProvider = context.watch<VillageProvider>();
 
     return Scaffold(
       body: Container(
@@ -146,19 +163,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           SizedBox(height: 8.h),
 
                           // Statistics Cards
-                          Text(
-                            'สถิติวันนี้',
-                            style: AppTextStyles.h4,
+                          Row(
+                            children: [
+                              Text(
+                                'สถิติวันนี้',
+                                style: AppTextStyles.h4,
+                              ),
+                              Spacer(),
+                              if (_isLoading)
+                                SizedBox(
+                                  width: 16.w,
+                                  height: 16.h,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                            ],
                           ),
                           SizedBox(height: 12.h),
+                          
                           _isLoading
-                              ? Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(20.h),
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                )
-                              : _buildStatisticsGrid(),
+                              ? _buildLoadingStats()
+                              : _buildStatisticsGrid(villageProvider),
 
                           SizedBox(height: 20.h),
 
@@ -171,6 +198,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           _buildMenuGrid(),
                           
                           SizedBox(height: 20.h),
+                          
+                          // Error Message (if any)
+                          if (_errorMessage != null)
+                            Container(
+                              padding: EdgeInsets.all(12.w),
+                              decoration: BoxDecoration(
+                                color: AppColors.warning.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8.r),
+                                border: Border.all(color: AppColors.warning.withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.warning_rounded, color: AppColors.warning, size: 20.sp),
+                                  SizedBox(width: 8.w),
+                                  Expanded(
+                                    child: Text(
+                                      'บางข้อมูลอาจโหลดไม่สำเร็จ',
+                                      style: AppTextStyles.caption.copyWith(color: AppColors.warning),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _loadDashboardData,
+                                    child: Text('ลองใหม่', style: TextStyle(fontSize: 12.sp)),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -234,11 +288,88 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
           ),
           IconButton(
+            onPressed: _loadDashboardData,
+            icon: Icon(
+              Icons.refresh_rounded,
+              color: Colors.white,
+              size: 22.sp,
+            ),
+            tooltip: 'รีเฟรช',
+          ),
+          IconButton(
             onPressed: () => _showLogoutDialog(),
             icon: Icon(
               Icons.logout_rounded,
               color: Colors.white,
               size: 22.sp,
+            ),
+            tooltip: 'ออกจากระบบ',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingStats() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: _buildLoadingCard()),
+            SizedBox(width: 10.w),
+            Expanded(child: _buildLoadingCard()),
+          ],
+        ),
+        SizedBox(height: 10.h),
+        _buildLoadingCard(),
+        SizedBox(height: 10.h),
+        Row(
+          children: [
+            Expanded(child: _buildLoadingCard()),
+            SizedBox(width: 10.w),
+            Expanded(child: _buildLoadingCard()),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadingCard() {
+    return CustomCard(
+      padding: EdgeInsets.all(12.w),
+      child: Row(
+        children: [
+          Container(
+            width: 40.w,
+            height: 40.h,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(10.r),
+            ),
+          ),
+          SizedBox(width: 12.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 50.w,
+                  height: 12.h,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(4.r),
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Container(
+                  width: 30.w,
+                  height: 18.h,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(4.r),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -246,7 +377,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildStatisticsGrid() {
+  Widget _buildStatisticsGrid(VillageProvider villageProvider) {
+    // ใช้จำนวนหมู่บ้านจาก Provider
+    final villageCount = villageProvider.villages.length;
+    
     return Column(
       children: [
         Row(
@@ -254,11 +388,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             Expanded(
               child: _buildStatCard(
                 title: 'หมู่บ้าน',
-                value: '$_totalVillages',
+                value: '$villageCount',
                 icon: Icons.home_work_rounded,
                 color: AppColors.primary,
                 onTap: () {
-                  // ไปหน้าจัดการหมู่บ้าน
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const VillageManagementScreen()),
@@ -274,7 +407,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 icon: Icons.people_rounded,
                 color: AppColors.accent,
                 onTap: () {
-                  // ไปหน้าจัดการผู้ใช้
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const UserManagementScreen()),
@@ -291,10 +423,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           icon: Icons.person_rounded,
           color: AppColors.info,
           isFullWidth: true,
-          onTap: () {
-            // แสดงรายละเอียดผู้อยู่ภายใน
-            _showCurrentVisitorsDialog();
-          },
+          onTap: () => _showCurrentVisitorsDialog(),
         ),
         SizedBox(height: 10.h),
         Row(
@@ -305,10 +434,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 value: '$_totalEntriesToday',
                 icon: Icons.login_rounded,
                 color: AppColors.success,
-                onTap: () {
-                  // แสดงรายละเอียดผู้เข้าวันนี้
-                  _showTodayEntriesDialog();
-                },
+                onTap: () => _showTodayEntriesDialog(),
               ),
             ),
             SizedBox(width: 10.w),
@@ -318,10 +444,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 value: '$_totalExitsToday',
                 icon: Icons.logout_rounded,
                 color: AppColors.warning,
-                onTap: () {
-                  // แสดงรายละเอียดผู้ออกวันนี้
-                  _showTodayExitsDialog();
-                },
+                onTap: () => _showTodayExitsDialog(),
               ),
             ),
           ],
@@ -376,7 +499,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ],
             ),
           ),
-          // แสดงลูกศรบอกว่าคลิกได้
           if (onTap != null)
             Icon(
               Icons.chevron_right_rounded,
@@ -388,7 +510,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // Dialog แสดงผู้อยู่ภายใน
   void _showCurrentVisitorsDialog() {
     showDialog(
       context: context,
@@ -430,7 +551,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // Dialog แสดงผู้เข้าวันนี้
   void _showTodayEntriesDialog() {
     showDialog(
       context: context,
@@ -472,7 +592,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // Dialog แสดงผู้ออกวันนี้
   void _showTodayExitsDialog() {
     showDialog(
       context: context,
@@ -515,7 +634,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildMenuGrid() {
-    // เฉพาะ 2 เมนูที่ต้องการ
     final menus = [
       {
         'title': 'จัดการหมู่บ้าน',
@@ -553,7 +671,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 context,
                 MaterialPageRoute(builder: (_) => menu['screen'] as Widget),
               );
-              // Refresh data when returning
               _loadDashboardData();
             }
           },
